@@ -34,33 +34,28 @@ jobs:
       - name: Create artifacts dir
         run: mkdir -p artifacts
 
-      - name: Build Linux amd64
+      - name: Build binaries
         env:
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
-          go build -ldflags "-X main.version=$VERSION" \
-            -o artifacts/lockwaved-linux-amd64 ./cmd/lockwaved
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          go build -ldflags "$LDFLAGS" -o artifacts/lockwaved-linux-amd64 ./cmd/lockwaved
+          GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o artifacts/lockwaved-linux-arm64 ./cmd/lockwaved
+          GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o artifacts/lockwaved-darwin-amd64 ./cmd/lockwaved
+          GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o artifacts/lockwaved-darwin-arm64 ./cmd/lockwaved
 
-      - name: Build Linux arm64
+      - name: Verify binary version
         env:
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
-          GOOS=linux GOARCH=arm64 go build -ldflags "-X main.version=$VERSION" \
-            -o artifacts/lockwaved-linux-arm64 ./cmd/lockwaved
-
-      - name: Build Darwin amd64
-        env:
-          VERSION: ${{ steps.version.outputs.VERSION }}
-        run: |
-          GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=$VERSION" \
-            -o artifacts/lockwaved-darwin-amd64 ./cmd/lockwaved
-
-      - name: Build Darwin arm64
-        env:
-          VERSION: ${{ steps.version.outputs.VERSION }}
-        run: |
-          GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.version=$VERSION" \
-            -o artifacts/lockwaved-darwin-arm64 ./cmd/lockwaved
+          ACTUAL=$(./artifacts/lockwaved-linux-amd64 version 2>&1 | head -1)
+          EXPECTED="lockwaved ${VERSION} (linux/amd64)"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::Version mismatch: expected '${EXPECTED}', got '${ACTUAL}'"
+            exit 1
+          fi
+          echo "Binary version verified: ${ACTUAL}"
+          echo "${VERSION}" > artifacts/VERSION
 
       - name: Generate SHA-256 checksums
         working-directory: artifacts

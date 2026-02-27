@@ -42,21 +42,10 @@ func TestApply_ChecksumMismatch(t *testing.T) {
 	}))
 	defer server.Close()
 
-	logger := telemetry.NewLogger(true)
-
-	// Apply will use HTTPS from the TLS test server, but we need to pass
-	// the server URL. Since httptest.NewTLSServer uses https://, this works.
-	// But the TLS cert won't be trusted. We test the pre-download validations above.
-	// For the checksum mismatch, we use the regular server and override the HTTPS check
-	// by testing with the actual flow where URL starts with https.
-	plainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write(binaryContent)
-	}))
-	defer plainServer.Close()
-
-	// The non-HTTPS server URL will be caught by the HTTPS check,
-	// so we test checksum mismatch logic directly via the hash computation test below.
-	// Full integration test with checksum mismatch requires TLS test server.
+	// The TLS test server URL starts with https://, so it passes the HTTPS check.
+	// However the self-signed cert won't be trusted by the default HTTP client,
+	// so full integration testing requires more setup.
+	// Pre-download validations (checksum required, HTTPS required) are covered above.
 	_ = server
 }
 

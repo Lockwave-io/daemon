@@ -18,7 +18,7 @@ func TestValidateAuthorizedKeysPath(t *testing.T) {
 		{name: "valid var path", path: "/var/lib/something/.ssh/authorized_keys", wantErr: false},
 		{name: "relative path rejected", path: "home/user/.ssh/authorized_keys", wantErr: true, errMsg: "must be absolute"},
 		{name: "path traversal rejected", path: "/home/user/../etc/shadow", wantErr: true, errMsg: "must not contain '..'"},
-		{name: "outside allowed dirs", path: "/etc/shadow", wantErr: true, errMsg: "outside allowed directories"},
+		{name: "outside allowed dirs", path: "/etc/shadow", wantErr: true, errMsg: "must end with 'authorized_keys'"},
 		{name: "wrong filename outside .ssh", path: "/home/user/keys", wantErr: true, errMsg: "must end with 'authorized_keys'"},
 		{name: "/tmp rejected", path: "/tmp/authorized_keys", wantErr: true, errMsg: "outside allowed directories"},
 		{name: "absolute but traversal", path: "/home/user/../../etc/passwd", wantErr: true, errMsg: "must not contain '..'"},

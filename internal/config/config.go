@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/lockwave-io/daemon/internal/system"
 	"gopkg.in/yaml.v3"
 )
 
@@ -59,7 +60,8 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// Save writes the config to the given path with 0600 permissions.
+// Save writes the config to the given path atomically with 0600 permissions.
+// Uses write-to-temp + fsync + rename to prevent corruption on crash.
 func Save(path string, cfg *Config) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
@@ -71,8 +73,8 @@ func Save(path string, cfg *Config) error {
 		return fmt.Errorf("config: mkdir %s: %w", dir, err)
 	}
 
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("config: write %s: %w", path, err)
+	if err := system.AtomicWrite(path, data, 0o600); err != nil {
+		return fmt.Errorf("config: atomic write %s: %w", path, err)
 	}
 
 	return nil

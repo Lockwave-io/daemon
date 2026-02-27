@@ -52,24 +52,24 @@ func Apply(url, checksum string, logger *slog.Logger) error {
 	written, err := io.Copy(writer, resp.Body)
 	if err != nil {
 		_ = tmpFile.Close()
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("update: write temp file: %w", err)
 	}
 
 	if err := tmpFile.Sync(); err != nil {
 		_ = tmpFile.Close()
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("update: sync temp file: %w", err)
 	}
 
 	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("update: close temp file: %w", err)
 	}
 
 	// Validate file size
 	if written == 0 {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("update: downloaded file is empty")
 	}
 
@@ -77,7 +77,7 @@ func Apply(url, checksum string, logger *slog.Logger) error {
 	gotHash := hex.EncodeToString(hasher.Sum(nil))
 	if checksum != "" {
 		if gotHash != checksum {
-			os.Remove(tmpPath)
+			_ = os.Remove(tmpPath)
 			return fmt.Errorf("update: checksum mismatch: expected %s, got %s", checksum, gotHash)
 		}
 		logger.Info("update checksum verified", "sha256", gotHash)
@@ -88,13 +88,13 @@ func Apply(url, checksum string, logger *slog.Logger) error {
 	// Validate the binary by running "version" subcommand
 	out, err := exec.Command(tmpPath, "version").CombinedOutput()
 	if err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("update: binary validation failed (not a valid lockwaved binary): %w: %s", err, string(out))
 	}
 	logger.Debug("update binary validated", "output", string(out))
 
 	if err := os.Rename(tmpPath, selfPath); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("update: rename over executable: %w", err)
 	}
 

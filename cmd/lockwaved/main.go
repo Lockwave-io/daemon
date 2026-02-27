@@ -27,8 +27,9 @@ func main() {
 	// Subcommand: register
 	registerCmd := flag.NewFlagSet("register", flag.ExitOnError)
 	regToken := registerCmd.String("token", "", "Enrollment token (required)")
-	regAPIURL := registerCmd.String("api-url", "", "Lockwave API base URL (required)")
+	regAPIURL := registerCmd.String("api-url", "https://lockwave.io", "Lockwave API base URL")
 	regOSUsers := registerCmd.String("os-user", "", "Comma-separated OS users to manage (required)")
+	regAuthorizedKeysPaths := registerCmd.String("authorized-keys-path", "", "Optional comma-separated authorized_keys paths (same order as --os-user)")
 	regPollSecs := registerCmd.Int("poll-seconds", 60, "Polling interval in seconds")
 	regConfigPath := registerCmd.String("config", config.DefaultConfigPath, "Config file path")
 
@@ -45,7 +46,7 @@ func main() {
 	switch os.Args[1] {
 	case "register":
 		registerCmd.Parse(os.Args[2:])
-		if err := runRegister(*regToken, *regAPIURL, *regOSUsers, *regPollSecs, *regConfigPath); err != nil {
+		if err := runRegister(*regToken, *regAPIURL, *regOSUsers, *regAuthorizedKeysPaths, *regPollSecs, *regConfigPath); err != nil {
 			fmt.Fprintf(os.Stderr, "Registration failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -67,9 +68,9 @@ func main() {
 	}
 }
 
-func runRegister(token, apiURL, osUsers string, pollSecs int, configPath string) error {
-	if token == "" || apiURL == "" || osUsers == "" {
-		return fmt.Errorf("--token, --api-url, and --os-user are required")
+func runRegister(token, apiURL, osUsers, authorizedKeysPaths string, pollSecs int, configPath string) error {
+	if token == "" || osUsers == "" {
+		return fmt.Errorf("--token and --os-user are required")
 	}
 
 	logger := telemetry.NewLogger(slog.LevelInfo)
@@ -77,11 +78,23 @@ func runRegister(token, apiURL, osUsers string, pollSecs int, configPath string)
 
 	hostname, _ := os.Hostname()
 
+	// Parse paths (optional; same order as os-user; fewer or empty is ok)
+	pathStrs := []string{}
+	if authorizedKeysPaths != "" {
+		for _, p := range strings.Split(authorizedKeysPaths, ",") {
+			pathStrs = append(pathStrs, strings.TrimSpace(p))
+		}
+	}
+
 	users := []state.UserEntry{}
-	for _, u := range strings.Split(osUsers, ",") {
+	for i, u := range strings.Split(osUsers, ",") {
 		u = strings.TrimSpace(u)
 		if u != "" {
-			users = append(users, state.UserEntry{OSUser: u})
+			entry := state.UserEntry{OSUser: u}
+			if i < len(pathStrs) && pathStrs[i] != "" {
+				entry.AuthorizedKeysPath = pathStrs[i]
+			}
+			users = append(users, entry)
 		}
 	}
 
@@ -101,10 +114,13 @@ func runRegister(token, apiURL, osUsers string, pollSecs int, configPath string)
 
 	logger.Info("registration successful", "host_id", resp.HostID)
 
-	// Build managed users config
+	// Build managed users config (include path so daemon uses it)
 	managedUsers := make([]config.ManagedUser, len(users))
 	for i, u := range users {
-		managedUsers[i] = config.ManagedUser{OSUser: u.OSUser}
+		managedUsers[i] = config.ManagedUser{
+			OSUser:             u.OSUser,
+			AuthorizedKeysPath: u.AuthorizedKeysPath,
+		}
 	}
 
 	cfg := &config.Config{

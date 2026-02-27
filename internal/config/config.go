@@ -26,6 +26,9 @@ type ManagedUser struct {
 // DefaultConfigPath is the standard location for the daemon config file.
 const DefaultConfigPath = "/etc/lockwave/config.yaml"
 
+// DefaultAPIURL is the default Lockwave API base URL when api_url is not set.
+const DefaultAPIURL = "https://lockwave.io"
+
 // Load reads and parses the YAML config from the given path.
 // It enforces that the file has restricted permissions (0600).
 func Load(path string) (*Config, error) {
@@ -75,10 +78,10 @@ func Save(path string, cfg *Config) error {
 	return nil
 }
 
-// Validate checks that all required fields are present.
+// Validate checks that all required fields are present and applies defaults.
 func (c *Config) Validate() error {
 	if c.APIURL == "" {
-		return fmt.Errorf("config: api_url is required")
+		c.APIURL = DefaultAPIURL
 	}
 	if c.HostID == "" {
 		return fmt.Errorf("config: host_id is required")

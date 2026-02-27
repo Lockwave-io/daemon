@@ -66,7 +66,6 @@ func TestLoad_MissingRequiredFields(t *testing.T) {
 		name    string
 		content string
 	}{
-		{"missing api_url", "host_id: h\ncredential: c\nmanaged_users:\n  - os_user: u\n"},
 		{"missing host_id", "api_url: https://x\ncredential: c\nmanaged_users:\n  - os_user: u\n"},
 		{"missing credential", "api_url: https://x\nhost_id: h\nmanaged_users:\n  - os_user: u\n"},
 		{"missing users", "api_url: https://x\nhost_id: h\ncredential: c\n"},
@@ -80,6 +79,23 @@ func TestLoad_MissingRequiredFields(t *testing.T) {
 				t.Errorf("expected validation error for %s", tt.name)
 			}
 		})
+	}
+}
+
+func TestLoad_EmptyAPIURLDefaultsToLockwave(t *testing.T) {
+	content := `host_id: h
+credential: c
+managed_users:
+  - os_user: deploy
+`
+	path := writeConfigFile(t, content, 0o600)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.APIURL != DefaultAPIURL {
+		t.Errorf("api_url = %q, want %q", cfg.APIURL, DefaultAPIURL)
 	}
 }
 

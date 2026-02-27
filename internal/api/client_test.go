@@ -78,6 +78,50 @@ func TestRegister_Success(t *testing.T) {
 	}
 }
 
+func TestRegister_SendsAuthorizedKeysPath(t *testing.T) {
+	var capturedReq state.RegisterRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&capturedReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(state.RegisterResponse{
+			HostID:     "host-1",
+			Credential: "secret-64chars-" + strings.Repeat("x", 48),
+			Policy: state.Policy{
+				MinPollSeconds:         30,
+				RecommendedPollSeconds: 60,
+				ManagedBlockMarkers:    state.BlockMarkers{Begin: "# begin", End: "# end"},
+			},
+			ServerTime: "2026-02-26T12:00:00Z",
+		})
+	}))
+	defer server.Close()
+
+	logger := telemetry.NewLogger(slog.LevelDebug)
+	users := []state.UserEntry{
+		{OSUser: "deploy"},
+		{OSUser: "www-data", AuthorizedKeysPath: "/var/www/.ssh/authorized_keys"},
+	}
+
+	_, err := Register(context.Background(), server.URL, "token", state.HostInfo{
+		Hostname: "h", OS: "linux", Arch: "x86_64", DaemonVersion: "1.0.0", IP: "1.2.3.4",
+	}, users, logger)
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+
+	if len(capturedReq.ManagedUsers) != 2 {
+		t.Fatalf("managed_users count = %d, want 2", len(capturedReq.ManagedUsers))
+	}
+	if capturedReq.ManagedUsers[0].AuthorizedKeysPath != "" {
+		t.Errorf("first user authorized_keys_path = %q, want empty", capturedReq.ManagedUsers[0].AuthorizedKeysPath)
+	}
+	if capturedReq.ManagedUsers[1].AuthorizedKeysPath != "/var/www/.ssh/authorized_keys" {
+		t.Errorf("second user authorized_keys_path = %q", capturedReq.ManagedUsers[1].AuthorizedKeysPath)
+	}
+}
+
 func TestRegister_InvalidToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)

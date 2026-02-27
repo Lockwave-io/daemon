@@ -2,12 +2,13 @@
 set -euo pipefail
 
 # Lockwave Daemon Installer
-# Usage: curl -fsSL https://lockwave.io/install.sh | bash -s -- \
+# Usage: curl -fsSL https://lockwave.io/install.sh | sudo bash -s -- \
 #   --token <enrollment_token> \
 #   --api-url <api_url> \
-#   --os-user deploy \
-#   [--authorized-keys-path /home/deploy/.ssh/authorized_keys] \
+#   --os-user deploy[,user2,...] \
+#   [--authorized-keys-path /path1[,/path2,...]] \
 #   [--poll-seconds 60]
+# Installs binary, registers host, writes config, and starts systemd service (no further steps).
 
 BINARY_URL="${LOCKWAVE_BINARY_URL:-https://releases.lockwave.io/lockwaved/latest}"
 INSTALL_DIR="/usr/local/bin"
@@ -37,8 +38,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$TOKEN" || -z "$API_URL" || -z "$OS_USER" ]]; then
-    echo "Error: --token, --api-url, and --os-user are required" >&2
+# Default API URL if not provided
+API_URL="${API_URL:-https://lockwave.io}"
+
+if [[ -z "$TOKEN" || -z "$OS_USER" ]]; then
+    echo "Error: --token and --os-user are required (--api-url defaults to https://lockwave.io)" >&2
     exit 1
 fi
 
@@ -75,6 +79,7 @@ REGISTER_ARGS=(
     --poll-seconds "$POLL_SECONDS"
     --config "${CONFIG_DIR}/config.yaml"
 )
+[[ -n "$AUTHORIZED_KEYS_PATH" ]] && REGISTER_ARGS+=(--authorized-keys-path "$AUTHORIZED_KEYS_PATH")
 
 "${INSTALL_DIR}/lockwaved" register "${REGISTER_ARGS[@]}"
 

@@ -1,5 +1,6 @@
 # Build lockwaved daemon, generate checksums + changelog, upload to releases storage (S3/Hetzner).
 # Trigger: push tag v* (e.g. v1.2.3). After run, set LOCKWAVE_DAEMON_CURRENT_VERSION in Laravel env.
+# Prunes GitHub releases and S3 bucket version dirs to the latest 3 (see prune job env RELEASES_TO_KEEP).
 
 name: Release Daemon
 
@@ -202,3 +203,81 @@ jobs:
             packaging/install.sh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  prune:
+    needs: [upload, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASES_TO_KEEP: 3
+    steps:
+      - name: Prune old GitHub releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          # List release tags (semver only), sort ascending (oldest first)
+          tags=$(gh release list --limit 100 --json tagName -q '.[].tagName' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
+          if [ -z "$tags" ]; then
+            echo "No semver release tags found."
+            exit 0
+          fi
+          count=$(echo "$tags" | wc -l)
+          if [ "$count" -le "$RELEASES_TO_KEEP" ]; then
+            echo "Only $count release(s); keeping all."
+            exit 0
+          fi
+          # Keep the newest RELEASES_TO_KEEP; delete the rest (oldest first)
+          to_delete=$((count - RELEASES_TO_KEEP))
+          echo "$tags" | sort -V | head -n "$to_delete" | while read -r tag; do
+            echo "Deleting GitHub release: $tag"
+            gh release delete "$tag" --repo "${{ github.repository }}" --yes
+          done
+
+      - name: Configure AWS CLI for Hetzner S3
+        env:
+          HETZNER_S3_ACCESS_KEY_ID: ${{ secrets.HETZNER_S3_ACCESS_KEY_ID }}
+          HETZNER_S3_SECRET_ACCESS_KEY: ${{ secrets.HETZNER_S3_SECRET_ACCESS_KEY }}
+        run: |
+          mkdir -p ~/.aws
+          echo "[default]" > ~/.aws/config
+          echo "region = eu-central-1" >> ~/.aws/config
+          echo "[default]" > ~/.aws/credentials
+          echo "aws_access_key_id = $HETZNER_S3_ACCESS_KEY_ID" >> ~/.aws/credentials
+          echo "aws_secret_access_key = $HETZNER_S3_SECRET_ACCESS_KEY" >> ~/.aws/credentials
+
+      - name: Prune old S3 version dirs
+        env:
+          HETZNER_S3_ENDPOINT: ${{ secrets.HETZNER_S3_ENDPOINT }}
+          HETZNER_S3_BUCKET: ${{ secrets.HETZNER_S3_BUCKET }}
+        run: |
+          set -e
+          echo "==> Removing old releases from S3 bucket (keeping latest $RELEASES_TO_KEEP version dirs)"
+          ENDPOINT="${HETZNER_S3_ENDPOINT#http://}"
+          ENDPOINT="${ENDPOINT#https://}"
+          ENDPOINT="https://${ENDPOINT}"
+
+          # List version dirs (exclude latest), semver only, sort ascending
+          versions=$(aws s3 ls "s3://$HETZNER_S3_BUCKET/releases/lockwaved/" \
+            --endpoint-url "$ENDPOINT" --region eu-central-1 \
+            | awk '$3=="PRE"{gsub(/\/$/,"",$4); print $4}' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V || true)
+          if [ -z "$versions" ]; then
+            echo "No version dirs found in S3."
+            exit 0
+          fi
+          count=$(echo "$versions" | wc -l)
+          if [ "$count" -le "$RELEASES_TO_KEEP" ]; then
+            echo "Only $count version dir(s) in bucket; keeping all."
+            exit 0
+          fi
+          to_delete=$((count - RELEASES_TO_KEEP))
+          echo "$versions" | head -n "$to_delete" | while read -r ver; do
+            echo "Deleting from bucket: releases/lockwaved/$ver/"
+            aws s3 rm "s3://$HETZNER_S3_BUCKET/releases/lockwaved/$ver/" \
+              --recursive --endpoint-url "$ENDPOINT" --region eu-central-1
+          done
+          echo "==> Bucket pruned to latest $RELEASES_TO_KEEP releases."

@@ -291,10 +291,14 @@ func doSync(ctx context.Context, client *api.Client, cfg *config.Config, configP
 			})
 			continue
 		}
+		fingerprints := parsed.ManagedKeys
+		if fingerprints == nil {
+			fingerprints = []string{}
+		}
 		observed = append(observed, state.Observed{
 			OSUser:                  u.OSUser,
 			ManagedBlockPresent:     parsed.HasManagedBlock,
-			ManagedKeysFingerprints: parsed.ManagedKeys,
+			ManagedKeysFingerprints: fingerprints,
 		})
 	}
 

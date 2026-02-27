@@ -123,10 +123,15 @@ jobs:
           HETZNER_S3_BUCKET: ${{ secrets.HETZNER_S3_BUCKET }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
+          # Normalize endpoint: ensure https:// scheme is present
+          ENDPOINT="${HETZNER_S3_ENDPOINT#http://}"
+          ENDPOINT="${ENDPOINT#https://}"
+          ENDPOINT="https://${ENDPOINT}"
+
           for f in lockwaved-* checksums.txt; do
             [ -f "$f" ] || continue
             aws s3 cp "$f" "s3://$HETZNER_S3_BUCKET/releases/lockwaved/$VERSION/$f" \
-              --endpoint-url "$HETZNER_S3_ENDPOINT" --region eu-central-1
+              --endpoint-url "$ENDPOINT" --region eu-central-1
           done
 
   release:
@@ -140,12 +145,18 @@ jobs:
         with:
           name: lockwaved-binaries
 
+      - name: Delete existing release (if any)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete "${{ github.ref_name }}" --repo "${{ github.repository }}" --yes 2>/dev/null || true
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: lockwaved ${{ github.ref_name }}
           generate_release_notes: true
+          make_latest: true
           files: |
             lockwaved-*
             checksums.txt

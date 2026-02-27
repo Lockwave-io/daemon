@@ -100,6 +100,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: packaging
+
       - name: Download artifacts
         uses: actions/download-artifact@v8
         with:
@@ -130,9 +134,20 @@ jobs:
 
           for f in lockwaved-* checksums.txt; do
             [ -f "$f" ] || continue
+            # Upload to versioned path
             aws s3 cp "$f" "s3://$HETZNER_S3_BUCKET/releases/lockwaved/$VERSION/$f" \
               --endpoint-url "$ENDPOINT" --region eu-central-1
+            # Upload to latest/ so the install script always gets the newest release
+            aws s3 cp "$f" "s3://$HETZNER_S3_BUCKET/releases/lockwaved/latest/$f" \
+              --endpoint-url "$ENDPOINT" --region eu-central-1
           done
+
+          # Upload install script to S3 root
+          if [ -f packaging/install.sh ]; then
+            aws s3 cp packaging/install.sh "s3://$HETZNER_S3_BUCKET/install.sh" \
+              --endpoint-url "$ENDPOINT" --region eu-central-1 \
+              --content-type "text/plain"
+          fi
 
   release:
     needs: build
@@ -144,6 +159,10 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: lockwaved-binaries
+
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: packaging
 
       - name: Delete existing release (if any)
         env:
@@ -161,5 +180,6 @@ jobs:
             lockwaved-*
             checksums.txt
             sbom.spdx.json
+            packaging/install.sh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

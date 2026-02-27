@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -17,10 +18,19 @@ import (
 const downloadTimeout = 5 * time.Minute
 
 // Apply downloads the binary from url and atomically replaces the current executable.
-// If checksum is non-empty, the downloaded binary's SHA-256 is verified against it.
-// The current executable path is resolved via os.Executable(). On success the caller
-// should exit (e.g. os.Exit(0)) so systemd or the process manager restarts the new binary.
+// The checksum (SHA-256 hex) is mandatory and verified after download.
+// The URL must use HTTPS. The current executable path is resolved via os.Executable().
+// On success the caller should exit (e.g. os.Exit(0)) so systemd or the process manager
+// restarts the new binary.
 func Apply(url, checksum string, logger *logrus.Logger) error {
+	if checksum == "" {
+		return fmt.Errorf("update: checksum is required but was empty")
+	}
+
+	if !strings.HasPrefix(url, "https://") {
+		return fmt.Errorf("update: refusing non-HTTPS update URL: %s", url)
+	}
+
 	selfPath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("update: resolve executable: %w", err)
@@ -74,17 +84,13 @@ func Apply(url, checksum string, logger *logrus.Logger) error {
 		return fmt.Errorf("update: downloaded file is empty")
 	}
 
-	// Verify checksum if provided
+	// Verify checksum (mandatory)
 	gotHash := hex.EncodeToString(hasher.Sum(nil))
-	if checksum != "" {
-		if gotHash != checksum {
-			_ = os.Remove(tmpPath)
-			return fmt.Errorf("update: checksum mismatch: expected %s, got %s", checksum, gotHash)
-		}
-		logger.WithField("sha256", gotHash).Info("update checksum verified")
-	} else {
-		logger.WithField("sha256", gotHash).Warn("update: no checksum provided, skipping verification")
+	if gotHash != checksum {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("update: checksum mismatch: expected %s, got %s", checksum, gotHash)
 	}
+	logger.WithField("sha256", gotHash).Info("update checksum verified")
 
 	// Validate the binary by running "version" subcommand
 	out, err := exec.Command(tmpPath, "version").CombinedOutput() // #nosec G204 -- tmpPath is constructed internally from os.Executable() dir, not user input

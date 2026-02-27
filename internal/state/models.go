@@ -49,7 +49,7 @@ type ConfigUser struct {
 type UpdateHint struct {
 	Version  string `json:"version"`
 	URL      string `json:"url"`
-	Checksum string `json:"checksum,omitempty"` // SHA-256 hex digest of the binary
+	Checksum string `json:"checksum"` // SHA-256 hex digest of the binary (mandatory)
 }
 
 // HostPolicy contains policy directives from the server.

@@ -80,6 +80,10 @@ func registerCommand() *cli.Command {
 				Usage: "Config file path",
 				Value: config.DefaultConfigPath,
 			},
+			&cli.BoolFlag{
+				Name:  "allow-insecure",
+				Usage: "Allow HTTP (non-TLS) connections to the API (unsafe, for development only)",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runRegister(
@@ -89,6 +93,7 @@ func registerCommand() *cli.Command {
 				cmd.String("authorized-keys-path"),
 				int(cmd.Int("poll-seconds")),
 				cmd.String("config"),
+				cmd.Bool("allow-insecure"),
 			)
 		},
 	}
@@ -199,8 +204,16 @@ func versionCommand() *cli.Command {
 	}
 }
 
-func runRegister(token, apiURL, osUsers, authorizedKeysPaths string, pollSecs int, configPath string) error {
+func runRegister(token, apiURL, osUsers, authorizedKeysPaths string, pollSecs int, configPath string, allowInsecure bool) error {
 	logger := telemetry.NewLogger(false)
+
+	if !strings.HasPrefix(apiURL, "https://") {
+		if !allowInsecure {
+			return fmt.Errorf("refusing non-HTTPS API URL %q (use --allow-insecure to override)", apiURL)
+		}
+		logger.Warn("using non-HTTPS API URL — credentials will be sent in cleartext")
+	}
+
 	logger.WithField("api_url", apiURL).Info("registering host")
 
 	hostname, _ := os.Hostname()
@@ -219,6 +232,9 @@ func runRegister(token, apiURL, osUsers, authorizedKeysPaths string, pollSecs in
 		if u != "" {
 			entry := state.UserEntry{OSUser: u}
 			if i < len(pathStrs) && pathStrs[i] != "" {
+				if err := config.ValidateAuthorizedKeysPath(pathStrs[i]); err != nil {
+					return fmt.Errorf("invalid authorized-keys-path for user %s: %w", u, err)
+				}
 				entry.AuthorizedKeysPath = pathStrs[i]
 			}
 			users = append(users, entry)
@@ -515,10 +531,18 @@ func reconcileConfig(cfg *config.Config, sc *state.SyncConfig, configPath string
 		}
 	}
 
-	// Build new user list from server config
+	// Build new user list from server config (with path validation)
 	if len(sc.ManagedUsers) > 0 {
 		newUsers := make([]config.ManagedUser, 0, len(sc.ManagedUsers))
 		for _, su := range sc.ManagedUsers {
+			if err := config.ValidateAuthorizedKeysPath(su.AuthorizedKeysPath); err != nil {
+				logger.WithFields(logrus.Fields{
+					"os_user": su.OSUser,
+					"path":    su.AuthorizedKeysPath,
+					"error":   err,
+				}).Warn("rejecting server-pushed authorized_keys_path: failed validation")
+				continue
+			}
 			newUsers = append(newUsers, config.ManagedUser{
 				OSUser:             su.OSUser,
 				AuthorizedKeysPath: su.AuthorizedKeysPath,

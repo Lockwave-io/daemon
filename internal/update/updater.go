@@ -1,11 +1,14 @@
 package update
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 )
@@ -13,9 +16,10 @@ import (
 const downloadTimeout = 5 * time.Minute
 
 // Apply downloads the binary from url and atomically replaces the current executable.
+// If checksum is non-empty, the downloaded binary's SHA-256 is verified against it.
 // The current executable path is resolved via os.Executable(). On success the caller
 // should exit (e.g. os.Exit(0)) so systemd or the process manager restarts the new binary.
-func Apply(url string, logger *slog.Logger) error {
+func Apply(url, checksum string, logger *slog.Logger) error {
 	selfPath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("update: resolve executable: %w", err)
@@ -41,7 +45,11 @@ func Apply(url string, logger *slog.Logger) error {
 		return fmt.Errorf("update: create temp file: %w", err)
 	}
 
-	written, err := io.Copy(tmpFile, resp.Body)
+	// Write to temp file while computing hash
+	hasher := sha256.New()
+	writer := io.MultiWriter(tmpFile, hasher)
+
+	written, err := io.Copy(writer, resp.Body)
 	if err != nil {
 		tmpFile.Close()
 		os.Remove(tmpPath)
@@ -59,11 +67,37 @@ func Apply(url string, logger *slog.Logger) error {
 		return fmt.Errorf("update: close temp file: %w", err)
 	}
 
+	// Validate file size
+	if written == 0 {
+		os.Remove(tmpPath)
+		return fmt.Errorf("update: downloaded file is empty")
+	}
+
+	// Verify checksum if provided
+	gotHash := hex.EncodeToString(hasher.Sum(nil))
+	if checksum != "" {
+		if gotHash != checksum {
+			os.Remove(tmpPath)
+			return fmt.Errorf("update: checksum mismatch: expected %s, got %s", checksum, gotHash)
+		}
+		logger.Info("update checksum verified", "sha256", gotHash)
+	} else {
+		logger.Warn("update: no checksum provided, skipping verification", "sha256", gotHash)
+	}
+
+	// Validate the binary by running "version" subcommand
+	out, err := exec.Command(tmpPath, "version").CombinedOutput()
+	if err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("update: binary validation failed (not a valid lockwaved binary): %w: %s", err, string(out))
+	}
+	logger.Debug("update binary validated", "output", string(out))
+
 	if err := os.Rename(tmpPath, selfPath); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("update: rename over executable: %w", err)
 	}
 
-	logger.Info("update applied", "url", url, "bytes", written, "path", selfPath)
+	logger.Info("update applied", "url", url, "bytes", written, "sha256", gotHash, "path", selfPath)
 	return nil
 }

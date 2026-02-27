@@ -1,6 +1,8 @@
 package authorizedkeys
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -51,6 +53,29 @@ func Apply(path string, keys []state.AuthorizedKey) error {
 	}
 
 	return nil
+}
+
+// HashManagedBlock reads the authorized_keys file at path and returns a SHA-256
+// hex digest of the managed block content (markers + key lines). Returns empty
+// string if the file doesn't exist or has no managed block.
+func HashManagedBlock(path string) (string, error) {
+	parsed, err := Parse(path)
+	if err != nil {
+		return "", err
+	}
+	if !parsed.HasManagedBlock {
+		return "", nil
+	}
+
+	// Reconstruct the managed block exactly as written
+	var lines []string
+	lines = append(lines, DefaultBeginMarker)
+	lines = append(lines, parsed.ManagedKeys...)
+	lines = append(lines, DefaultEndMarker)
+	content := strings.Join(lines, "\n")
+
+	h := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(h[:]), nil
 }
 
 // RenderManagedBlock produces just the managed block content (for testing/display).

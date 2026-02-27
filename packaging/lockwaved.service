@@ -6,6 +6,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+ExecStartPre=/usr/local/bin/lockwaved check --config /etc/lockwave/config.yaml
 ExecStart=/usr/local/bin/lockwaved run --config /etc/lockwave/config.yaml
 Restart=always
 RestartSec=10

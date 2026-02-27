@@ -1,0 +1,158 @@
+# Build lockwaved daemon, generate checksums + changelog, upload to releases storage (S3/Hetzner).
+# Trigger: push tag v* (e.g. v1.2.3). After run, set LOCKWAVE_DAEMON_CURRENT_VERSION in Laravel env.
+
+name: Release Daemon
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for changelog
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create artifacts dir
+        run: mkdir -p "Source Code/artifacts"
+
+      - name: Build Linux amd64
+        working-directory: Source Code/lockwave
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          go build -ldflags "-X main.version=$VERSION" \
+            -o ../artifacts/lockwaved-linux-amd64 ./cmd/lockwaved
+
+      - name: Build Linux arm64
+        working-directory: Source Code/lockwave
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          GOOS=linux GOARCH=arm64 go build -ldflags "-X main.version=$VERSION" \
+            -o ../artifacts/lockwaved-linux-arm64 ./cmd/lockwaved
+
+      - name: Build Darwin amd64
+        working-directory: Source Code/lockwave
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=$VERSION" \
+            -o ../artifacts/lockwaved-darwin-amd64 ./cmd/lockwaved
+
+      - name: Build Darwin arm64
+        working-directory: Source Code/lockwave
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.version=$VERSION" \
+            -o ../artifacts/lockwaved-darwin-arm64 ./cmd/lockwaved
+
+      - name: Generate SHA-256 checksums
+        working-directory: Source Code/artifacts
+        run: |
+          sha256sum lockwaved-* > checksums.txt
+          cat checksums.txt
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-version:refname | head -n 2 | tail -n 1)
+          if [ -z "$PREV_TAG" ]; then
+            echo "CHANGELOG=Initial release" >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "CHANGELOG<<EOF"
+              git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD" -- "Source Code/lockwave/" 2>/dev/null || echo "- Bug fixes and improvements"
+              echo ""
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: Source Code/lockwave
+          output-file: Source Code/artifacts/sbom.spdx.json
+          format: spdx-json
+        continue-on-error: true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lockwaved-binaries
+          path: Source Code/artifacts/
+
+  upload:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lockwaved-binaries
+
+      - name: Configure AWS CLI for Hetzner S3
+        env:
+          HETZNER_S3_ACCESS_KEY_ID: ${{ secrets.HETZNER_S3_ACCESS_KEY_ID }}
+          HETZNER_S3_SECRET_ACCESS_KEY: ${{ secrets.HETZNER_S3_SECRET_ACCESS_KEY }}
+        run: |
+          mkdir -p ~/.aws
+          echo "[default]" > ~/.aws/config
+          echo "region = eu-central-1" >> ~/.aws/config
+          echo "[default]" > ~/.aws/credentials
+          echo "aws_access_key_id = $HETZNER_S3_ACCESS_KEY_ID" >> ~/.aws/credentials
+          echo "aws_secret_access_key = $HETZNER_S3_SECRET_ACCESS_KEY" >> ~/.aws/credentials
+
+      - name: Upload to S3
+        env:
+          HETZNER_S3_ENDPOINT: ${{ secrets.HETZNER_S3_ENDPOINT }}
+          HETZNER_S3_BUCKET: ${{ secrets.HETZNER_S3_BUCKET }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          for f in lockwaved-* checksums.txt; do
+            [ -f "$f" ] || continue
+            aws s3 cp "$f" "s3://$HETZNER_S3_BUCKET/releases/lockwaved/$VERSION/$f" \
+              --endpoint-url "$HETZNER_S3_ENDPOINT" --region eu-central-1
+          done
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lockwaved-binaries
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: lockwaved ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            lockwaved-*
+            checksums.txt
+            sbom.spdx.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

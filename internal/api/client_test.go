@@ -372,6 +372,60 @@ func TestE2E_SyncAndApply(t *testing.T) {
 	}
 }
 
+func TestHealthCheck_Success(t *testing.T) {
+	credential := "health-check-credential"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(state.SyncResponse{
+			ServerTime: "2026-02-27T12:00:00Z",
+			HostPolicy: state.HostPolicy{
+				PollSeconds: 60,
+				BreakGlass:  state.BreakGlass{Active: false},
+			},
+			DesiredState: []state.DesiredState{},
+		})
+	}))
+	defer server.Close()
+
+	logger := telemetry.NewLogger(slog.LevelDebug)
+	client := NewClient(server.URL, "host-health", credential, logger)
+
+	ctx := context.Background()
+	resp, err := client.Sync(ctx, &state.SyncRequest{
+		HostID:        "host-health",
+		DaemonVersion: "1.0.0",
+		Status:        state.HostStatus{LastApplyResult: "pending", DriftDetected: false},
+		Observed:      []state.Observed{{OSUser: "deploy", ManagedBlockPresent: false, ManagedKeysFingerprints: []string{}}},
+	})
+
+	if err != nil {
+		t.Fatalf("health check sync failed: %v", err)
+	}
+	if resp.ServerTime != "2026-02-27T12:00:00Z" {
+		t.Errorf("server_time = %q", resp.ServerTime)
+	}
+	if resp.HostPolicy.PollSeconds != 60 {
+		t.Errorf("poll_seconds = %d", resp.HostPolicy.PollSeconds)
+	}
+}
+
+func TestHealthCheck_ServerDown(t *testing.T) {
+	// Use a port that's not listening
+	logger := telemetry.NewLogger(slog.LevelDebug)
+	client := NewClient("http://127.0.0.1:1", "host-fail", "cred", logger)
+
+	ctx := context.Background()
+	_, err := client.Sync(ctx, &state.SyncRequest{
+		HostID:   "host-fail",
+		Status:   state.HostStatus{LastApplyResult: "pending"},
+		Observed: []state.Observed{},
+	})
+
+	if err == nil {
+		t.Fatal("expected error when server is unreachable")
+	}
+}
+
 func strPtr(s string) *string {
 	return &s
 }

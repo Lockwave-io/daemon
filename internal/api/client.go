@@ -67,7 +67,7 @@ func Register(ctx context.Context, apiURL, token string, hostInfo state.HostInfo
 	if err != nil {
 		return nil, fmt.Errorf("api: register request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -151,7 +151,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, endpoint, path string,
 		}
 
 		respBody, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			c.logger.Warn("read response failed", "error", err, "attempt", attempt+1)
 			continue

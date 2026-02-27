@@ -34,7 +34,7 @@ func Parse(path string) (*ParsedFile, error) {
 		}
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var result ParsedFile
 	scanner := bufio.NewScanner(f)

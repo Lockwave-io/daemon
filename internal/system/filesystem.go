@@ -23,25 +23,25 @@ func AtomicWrite(path string, data []byte, perm os.FileMode) error {
 	success := false
 	defer func() {
 		if !success {
-			os.Remove(tmpPath)
+			_ = os.Remove(tmpPath)
 		}
 	}()
 
 	// Write data
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("write temp: %w", err)
 	}
 
 	// Set permissions before fsync
 	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("chmod temp: %w", err)
 	}
 
 	// Fsync to ensure data is on disk
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("fsync temp: %w", err)
 	}
 

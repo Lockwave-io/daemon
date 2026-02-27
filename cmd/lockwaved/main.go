@@ -62,13 +62,17 @@ func main() {
 
 	switch os.Args[1] {
 	case "register":
-		registerCmd.Parse(os.Args[2:])
+		if err := registerCmd.Parse(os.Args[2:]); err != nil {
+			os.Exit(1)
+		}
 		if err := runRegister(*regToken, *regAPIURL, *regOSUsers, *regAuthorizedKeysPaths, *regPollSecs, *regConfigPath); err != nil {
 			fmt.Fprintf(os.Stderr, "Registration failed: %v\n", err)
 			os.Exit(1)
 		}
 	case "run":
-		runFlags.Parse(os.Args[2:])
+		if err := runFlags.Parse(os.Args[2:]); err != nil {
+			os.Exit(1)
+		}
 		level := slog.LevelInfo
 		if *runDebug {
 			level = slog.LevelDebug
@@ -78,19 +82,25 @@ func main() {
 			os.Exit(1)
 		}
 	case "configure":
-		configureCmd.Parse(os.Args[2:])
+		if err := configureCmd.Parse(os.Args[2:]); err != nil {
+			os.Exit(1)
+		}
 		if err := runConfigure(*cfgPath, *cfgAddUser, *cfgRemoveUser, *cfgPollSecs, *cfgAPIURL); err != nil {
 			fmt.Fprintf(os.Stderr, "Configure failed: %v\n", err)
 			os.Exit(1)
 		}
 	case "status":
-		statusCmd.Parse(os.Args[2:])
+		if err := statusCmd.Parse(os.Args[2:]); err != nil {
+			os.Exit(1)
+		}
 		if err := runStatus(*statusConfigPath); err != nil {
 			fmt.Fprintf(os.Stderr, "Status failed: %v\n", err)
 			os.Exit(1)
 		}
 	case "check":
-		checkCmd.Parse(os.Args[2:])
+		if err := checkCmd.Parse(os.Args[2:]); err != nil {
+			os.Exit(1)
+		}
 		if err := runCheck(*checkConfigPath); err != nil {
 			fmt.Fprintf(os.Stderr, "Check failed: %v\n", err)
 			os.Exit(1)

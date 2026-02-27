@@ -33,7 +33,7 @@ func Apply(url, checksum string, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("update: download %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -51,13 +51,13 @@ func Apply(url, checksum string, logger *slog.Logger) error {
 
 	written, err := io.Copy(writer, resp.Body)
 	if err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		os.Remove(tmpPath)
 		return fmt.Errorf("update: write temp file: %w", err)
 	}
 
 	if err := tmpFile.Sync(); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		os.Remove(tmpPath)
 		return fmt.Errorf("update: sync temp file: %w", err)
 	}

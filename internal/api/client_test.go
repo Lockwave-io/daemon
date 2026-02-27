@@ -39,7 +39,7 @@ func TestRegister_Success(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(state.RegisterResponse{
+		_ = json.NewEncoder(w).Encode(state.RegisterResponse{
 			HostID:     "host-uuid-123",
 			Credential: "secret-credential-64chars-" + strings.Repeat("x", 38),
 			Policy: state.Policy{
@@ -85,7 +85,7 @@ func TestRegister_SendsAuthorizedKeysPath(t *testing.T) {
 			t.Fatalf("decode request: %v", err)
 		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(state.RegisterResponse{
+		_ = json.NewEncoder(w).Encode(state.RegisterResponse{
 			HostID:     "host-1",
 			Credential: "secret-64chars-" + strings.Repeat("x", 48),
 			Policy: state.Policy{
@@ -125,7 +125,7 @@ func TestRegister_SendsAuthorizedKeysPath(t *testing.T) {
 func TestRegister_InvalidToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		w.Write([]byte(`{"error":"Invalid token"}`))
+		_, _ = w.Write([]byte(`{"error":"Invalid token"}`))
 	}))
 	defer server.Close()
 

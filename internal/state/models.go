@@ -111,6 +111,7 @@ type RegisterResponse struct {
 type Policy struct {
 	MinPollSeconds         int          `json:"min_poll_seconds"`
 	RecommendedPollSeconds int          `json:"recommended_poll_seconds"`
+	FirstSyncSeconds       int          `json:"first_sync_seconds"`
 	ManagedBlockMarkers    BlockMarkers `json:"managed_block_markers"`
 }
 

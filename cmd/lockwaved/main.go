@@ -267,11 +267,12 @@ func runRegister(token, apiURL, osUsers, authorizedKeysPaths string, pollSecs in
 	}
 
 	cfg := &config.Config{
-		APIURL:     apiURL,
-		HostID:     resp.HostID,
-		Credential: resp.Credential,
-		PollSecs:   pollSecs,
-		Users:      managedUsers,
+		APIURL:       apiURL,
+		HostID:       resp.HostID,
+		Credential:   resp.Credential,
+		PollSecs:     pollSecs,
+		Users:        managedUsers,
+		RegisteredAt: time.Now().UTC().Format(time.RFC3339),
 	}
 
 	if err := config.Save(configPath, cfg); err != nil {
@@ -315,6 +316,24 @@ func runDaemon(configPath string, debug bool) error {
 	var lastDrift bool
 	currentPollSecs := cfg.PollSecs
 
+	// Determine if we're in the 2-minute fast-sync window after registration
+	fastSyncUntil := time.Time{}
+	if cfg.RegisteredAt != "" {
+		if regTime, err := time.Parse(time.RFC3339, cfg.RegisteredAt); err == nil {
+			fastSyncUntil = regTime.Add(2 * time.Minute)
+		}
+	}
+
+	inFastSync := func() bool {
+		return !fastSyncUntil.IsZero() && time.Now().Before(fastSyncUntil)
+	}
+
+	// Use fast-sync interval if within window
+	if inFastSync() {
+		currentPollSecs = 10
+		logger.WithField("until", fastSyncUntil.Format(time.RFC3339)).Info("in fast-sync window, using 10s interval")
+	}
+
 	logger.WithField("poll_seconds", currentPollSecs).Info("entering sync loop")
 
 	// Initial sync immediately, then poll
@@ -331,18 +350,28 @@ func runDaemon(configPath string, debug bool) error {
 			lastResult = "success"
 			lastDrift = false
 
-			// Respect server-provided poll interval
-			if resp != nil && resp.HostPolicy.PollSeconds > 0 && resp.HostPolicy.PollSeconds != currentPollSecs {
-				newPoll := resp.HostPolicy.PollSeconds
-				if newPoll < 10 {
-					newPoll = 10
+			// Respect server-provided poll interval (with fast-sync override)
+			if resp != nil && resp.HostPolicy.PollSeconds > 0 {
+				desiredPoll := resp.HostPolicy.PollSeconds
+				if desiredPoll < 10 {
+					desiredPoll = 10
 				}
-				logger.WithFields(logrus.Fields{
-					"old_seconds": currentPollSecs,
-					"new_seconds": newPoll,
-				}).Info("server updated poll interval")
-				currentPollSecs = newPoll
-				ticker.Reset(time.Duration(currentPollSecs) * time.Second)
+				// During fast-sync window, cap at 10 seconds
+				if inFastSync() && desiredPoll > 10 {
+					desiredPoll = 10
+				}
+				if desiredPoll != currentPollSecs {
+					logger.WithFields(logrus.Fields{
+						"old_seconds": currentPollSecs,
+						"new_seconds": desiredPoll,
+					}).Info("poll interval adjusted")
+					currentPollSecs = desiredPoll
+					ticker.Reset(time.Duration(currentPollSecs) * time.Second)
+				}
+			}
+			// Clear fast-sync window once expired
+			if !inFastSync() && !fastSyncUntil.IsZero() {
+				fastSyncUntil = time.Time{}
 			}
 
 			// Check auto_update flag from config section (defaults to true if no config)

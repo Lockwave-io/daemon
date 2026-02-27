@@ -11,11 +11,12 @@ import (
 
 // Config holds all daemon configuration.
 type Config struct {
-	APIURL     string        `yaml:"api_url"`
-	HostID     string        `yaml:"host_id"`
-	Credential string        `yaml:"credential"`
-	PollSecs   int           `yaml:"poll_seconds"`
-	Users      []ManagedUser `yaml:"managed_users"`
+	APIURL       string        `yaml:"api_url"`
+	HostID       string        `yaml:"host_id"`
+	Credential   string        `yaml:"credential"`
+	PollSecs     int           `yaml:"poll_seconds"`
+	Users        []ManagedUser `yaml:"managed_users"`
+	RegisteredAt string        `yaml:"registered_at,omitempty"`
 }
 
 // ManagedUser represents an OS user whose authorized_keys the daemon manages.

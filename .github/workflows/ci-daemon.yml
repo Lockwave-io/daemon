@@ -62,10 +62,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: Source Code/lockwave/go.sum
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
+          install-mode: goinstall
           working-directory: Source Code/lockwave
 
   security:
@@ -122,10 +129,10 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25'
+          cache-dependency-path: Source Code/lockwave/go.sum
 
       - name: Verify and tidy go mod
         run: |
-          cd Source Code/lockwave
           go mod verify
           go mod tidy
           git diff --exit-code go.mod go.sum

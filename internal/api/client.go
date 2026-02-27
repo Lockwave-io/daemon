@@ -26,10 +26,25 @@ type Client struct {
 	logger     *slog.Logger
 }
 
+// normalizeHTTPS upgrades http:// URLs to https:// to prevent
+// HTTP→HTTPS redirects that convert POST requests to GET (RFC 7231).
+// Localhost URLs are left unchanged for local development.
+func normalizeHTTPS(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	if parsed.Scheme == "http" && !strings.Contains(parsed.Host, "localhost") && !strings.Contains(parsed.Host, "127.0.0.1") {
+		parsed.Scheme = "https"
+		return parsed.String()
+	}
+	return rawURL
+}
+
 // NewClient creates a new API client.
 func NewClient(baseURL, hostID, credential string, logger *slog.Logger) *Client {
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
+		baseURL: strings.TrimRight(normalizeHTTPS(baseURL), "/"),
 		hostID:  hostID,
 		signer:  auth.NewSigner(credential),
 		httpClient: &http.Client{
@@ -53,7 +68,9 @@ func Register(ctx context.Context, apiURL, token string, hostInfo state.HostInfo
 		return nil, fmt.Errorf("api: marshal register request: %w", err)
 	}
 
-	endpoint := strings.TrimRight(apiURL, "/") + "/api/daemon/v1/register"
+	// Normalize to HTTPS to avoid HTTP→HTTPS redirects that convert POST to GET.
+	normalizedURL := normalizeHTTPS(apiURL)
+	endpoint := strings.TrimRight(normalizedURL, "/") + "/api/daemon/v1/register"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {

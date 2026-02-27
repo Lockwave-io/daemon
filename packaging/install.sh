@@ -55,6 +55,11 @@ done
 # Default API URL if not provided
 API_URL="${API_URL:-https://lockwave.io}"
 
+# Normalize to HTTPS (HTTP→HTTPS redirects convert POST to GET, breaking registration)
+if [[ "$API_URL" =~ ^http:// ]] && [[ ! "$API_URL" =~ ^http://(localhost|127\.0\.0\.1) ]]; then
+    API_URL="${API_URL/http:\/\//https:\/\/}"
+fi
+
 # Detect architecture
 detect_platform() {
     ARCH=$(uname -m)

@@ -36,6 +36,7 @@ func main() {
 			configureCommand(),
 			statusCommand(),
 			checkCommand(),
+			versionCommand(),
 		},
 	}
 
@@ -183,6 +184,17 @@ func checkCommand() *cli.Command {
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runCheck(cmd.String("config"))
+		},
+	}
+}
+
+func versionCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "version",
+		Usage: "Print the daemon version",
+		Action: func(_ context.Context, _ *cli.Command) error {
+			fmt.Printf("lockwaved %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
+			return nil
 		},
 	}
 }

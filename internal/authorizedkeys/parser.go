@@ -27,7 +27,7 @@ type ParsedFile struct {
 
 // Parse reads an authorized_keys file and splits it into managed and unmanaged sections.
 func Parse(path string) (*ParsedFile, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path is from daemon config (CLI flag or default), not user-controlled web input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &ParsedFile{}, nil

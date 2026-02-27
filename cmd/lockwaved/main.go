@@ -108,7 +108,7 @@ func main() {
 	case "version":
 		fmt.Printf("lockwaved %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\nUsage: lockwaved <register|run|configure|status|check|version> [flags]\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "Unknown command: %s\nUsage: lockwaved <register|run|configure|status|check|version> [flags]\n", os.Args[1]) // #nosec G705 -- CLI error output to stderr, not a web response
 		os.Exit(1)
 	}
 }

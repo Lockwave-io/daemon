@@ -1,5 +1,4 @@
 # CI for lockwaved daemon: build, test (with coverage), lint, security scan, cross-compile, go mod.
-# Runs only when Source Code/lockwave or this workflow changes.
 
 name: CI Daemon
 
@@ -7,17 +6,19 @@ on:
   push:
     branches: [main]
     paths:
-      - 'Source Code/lockwave/**'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/ci-daemon.yml'
   pull_request:
     branches: [main]
     paths:
-      - 'Source Code/lockwave/**'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/ci-daemon.yml'
-
-defaults:
-  run:
-    working-directory: Source Code/lockwave
 
 jobs:
   build:
@@ -29,7 +30,6 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: '1.25'
-          cache-dependency-path: Source Code/lockwave/go.sum
 
       - name: Build
         run: go build ./...
@@ -43,7 +43,6 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: '1.25'
-          cache-dependency-path: Source Code/lockwave/go.sum
 
       - name: Run tests with coverage
         run: go test -race -coverprofile=coverage.out ./...
@@ -55,7 +54,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: coverage-report
-          path: Source Code/lockwave/coverage.out
+          path: coverage.out
 
   lint:
     runs-on: ubuntu-latest
@@ -66,14 +65,12 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: '1.25'
-          cache-dependency-path: Source Code/lockwave/go.sum
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           install-mode: goinstall
-          working-directory: Source Code/lockwave
 
   security:
     runs-on: ubuntu-latest
@@ -84,7 +81,6 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: '1.25'
-          cache-dependency-path: Source Code/lockwave/go.sum
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -112,7 +108,6 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: '1.25'
-          cache-dependency-path: Source Code/lockwave/go.sum
 
       - name: Build target
         env:
@@ -129,7 +124,6 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: '1.25'
-          cache-dependency-path: Source Code/lockwave/go.sum
 
       - name: Verify and tidy go mod
         run: |

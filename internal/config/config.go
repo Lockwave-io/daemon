@@ -42,7 +42,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: %s has insecure permissions %o (must be 0600)", path, perm)
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- config path is from CLI flag or default constant, not user-controlled web input
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}

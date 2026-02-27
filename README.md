@@ -3,7 +3,7 @@
 **lockwaved** is the host agent for [Lockwave](https://lockwave.io): it polls the Lockwave control plane and keeps SSH `authorized_keys` in sync by managing a dedicated block in each configured user’s file. All communication is **outbound-only** from the host to the Lockwave API.
 
 - **Product:** [Lockwave](https://lockwave.io) — centralized SSH key lifecycle management
-- **Repository:** [github.com/Lockwave-io/daemon](https://github.com/Lockwave-io/daemon)
+- **Repository:** [github.com/lockwave-io/daemon](https://github.com/lockwave-io/daemon)
 
 ---
 
@@ -172,7 +172,7 @@ Builds with version `dev` do not self-update. If the replace fails (e.g. read-on
 Requires **Go 1.25+**.
 
 ```bash
-git clone https://github.com/Lockwave-io/daemon.git
+git clone https://github.com/lockwave-io/daemon.git
 cd daemon
 go build -o lockwaved ./cmd/lockwaved
 ```

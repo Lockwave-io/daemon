@@ -1,0 +1,26 @@
+# Build output (Makefile: build/)
+build/
+
+# Binaries
+lockwaved
+lockwaved-*
+*.exe
+
+# Test coverage
+*.out
+coverage.html
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config (do not commit secrets)
+config.yaml
+*.local.yaml

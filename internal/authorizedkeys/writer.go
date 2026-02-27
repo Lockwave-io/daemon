@@ -78,6 +78,34 @@ func HashManagedBlock(path string) (string, error) {
 	return hex.EncodeToString(h[:]), nil
 }
 
+// StripManagedBlock removes the entire managed block (markers and keys) from
+// the authorized_keys file, leaving only unmanaged keys intact. This is used
+// when a user is removed from management — we don't want to leave stale markers.
+func StripManagedBlock(path string) error {
+	parsed, err := Parse(path)
+	if err != nil {
+		return fmt.Errorf("authorizedkeys: parse for strip: %w", err)
+	}
+	if !parsed.HasManagedBlock {
+		return nil
+	}
+
+	var lines []string
+	lines = append(lines, parsed.PreBlock...)
+	lines = append(lines, parsed.PostBlock...)
+
+	content := strings.Join(lines, "\n")
+	if content != "" {
+		content += "\n"
+	}
+
+	if err := system.AtomicWrite(path, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("authorizedkeys: atomic write (strip): %w", err)
+	}
+
+	return nil
+}
+
 // RenderManagedBlock produces just the managed block content (for testing/display).
 func RenderManagedBlock(keys []state.AuthorizedKey) string {
 	var lines []string

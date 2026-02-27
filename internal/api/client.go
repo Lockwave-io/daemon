@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/lockwave-io/daemon/internal/auth"
 	"github.com/lockwave-io/daemon/internal/state"
@@ -23,7 +24,7 @@ type Client struct {
 	hostID     string
 	signer     *auth.Signer
 	httpClient *http.Client
-	logger     *slog.Logger
+	logger     *logrus.Logger
 }
 
 // normalizeHTTPS upgrades http:// URLs to https:// to prevent
@@ -42,7 +43,7 @@ func normalizeHTTPS(rawURL string) string {
 }
 
 // NewClient creates a new API client.
-func NewClient(baseURL, hostID, credential string, logger *slog.Logger) *Client {
+func NewClient(baseURL, hostID, credential string, logger *logrus.Logger) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(normalizeHTTPS(baseURL), "/"),
 		hostID:  hostID,
@@ -56,7 +57,7 @@ func NewClient(baseURL, hostID, credential string, logger *slog.Logger) *Client 
 
 // Register performs the initial host registration using an enrollment token.
 // This is called once during setup and does not require HMAC signing.
-func Register(ctx context.Context, apiURL, token string, hostInfo state.HostInfo, users []state.UserEntry, logger *slog.Logger) (*state.RegisterResponse, error) {
+func Register(ctx context.Context, apiURL, token string, hostInfo state.HostInfo, users []state.UserEntry, logger *logrus.Logger) (*state.RegisterResponse, error) {
 	reqBody := state.RegisterRequest{
 		EnrollmentToken: token,
 		Host:            hostInfo,
@@ -129,7 +130,10 @@ func (c *Client) doWithRetry(ctx context.Context, method, endpoint, path string,
 	for attempt := range maxRetries {
 		if attempt > 0 {
 			backoff := time.Duration(math.Pow(2, float64(attempt))) * time.Second
-			c.logger.Info("retrying request", "attempt", attempt+1, "backoff", backoff)
+			c.logger.WithFields(logrus.Fields{
+				"attempt": attempt + 1,
+				"backoff": backoff,
+			}).Info("retrying request")
 
 			select {
 			case <-ctx.Done():
@@ -163,19 +167,28 @@ func (c *Client) doWithRetry(ctx context.Context, method, endpoint, path string,
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			c.logger.Warn("request failed", "error", err, "attempt", attempt+1)
+			c.logger.WithFields(logrus.Fields{
+				"error":   err,
+				"attempt": attempt + 1,
+			}).Warn("request failed")
 			continue
 		}
 
 		respBody, err := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if err != nil {
-			c.logger.Warn("read response failed", "error", err, "attempt", attempt+1)
+			c.logger.WithFields(logrus.Fields{
+				"error":   err,
+				"attempt": attempt + 1,
+			}).Warn("read response failed")
 			continue
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-			c.logger.Warn("server error, retrying", "status", resp.StatusCode, "attempt", attempt+1)
+			c.logger.WithFields(logrus.Fields{
+				"status":  resp.StatusCode,
+				"attempt": attempt + 1,
+			}).Warn("server error, retrying")
 			continue
 		}
 

@@ -29,6 +29,20 @@ type SyncResponse struct {
 	DesiredState       []DesiredState  `json:"desired_state"`
 	CredentialRotation *string         `json:"credential_rotation"`
 	Update             *UpdateHint     `json:"update,omitempty"`
+	Config             *SyncConfig     `json:"config,omitempty"`
+}
+
+// SyncConfig carries configuration directives from the control plane.
+type SyncConfig struct {
+	ManagedUsers []ConfigUser `json:"managed_users"`
+	PollSeconds  int          `json:"poll_seconds"`
+	AutoUpdate   bool         `json:"auto_update"`
+}
+
+// ConfigUser describes an OS user the daemon should manage.
+type ConfigUser struct {
+	OSUser             string `json:"os_user"`
+	AuthorizedKeysPath string `json:"authorized_keys_path,omitempty"`
 }
 
 // UpdateHint tells the daemon a newer version is available and where to download it.

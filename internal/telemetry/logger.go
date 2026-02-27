@@ -1,15 +1,22 @@
 package telemetry
 
 import (
-	"log/slog"
 	"os"
+
+	"github.com/sirupsen/logrus"
 )
 
 // NewLogger creates a structured JSON logger for the daemon.
-func NewLogger(level slog.Level) *slog.Logger {
-	opts := &slog.HandlerOptions{
-		Level: level,
+func NewLogger(debug bool) *logrus.Logger {
+	logger := logrus.New()
+	logger.SetOutput(os.Stderr)
+	logger.SetFormatter(&logrus.JSONFormatter{})
+
+	if debug {
+		logger.SetLevel(logrus.DebugLevel)
+	} else {
+		logger.SetLevel(logrus.InfoLevel)
 	}
-	handler := slog.NewJSONHandler(os.Stderr, opts)
-	return slog.New(handler)
+
+	return logger
 }

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -55,7 +54,7 @@ func TestRegister_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	logger := telemetry.NewLogger(slog.LevelDebug)
+	logger := telemetry.NewLogger(true)
 	ctx := context.Background()
 
 	resp, err := Register(ctx, server.URL, "test-token-value", state.HostInfo{
@@ -98,7 +97,7 @@ func TestRegister_SendsAuthorizedKeysPath(t *testing.T) {
 	}))
 	defer server.Close()
 
-	logger := telemetry.NewLogger(slog.LevelDebug)
+	logger := telemetry.NewLogger(true)
 	users := []state.UserEntry{
 		{OSUser: "deploy"},
 		{OSUser: "www-data", AuthorizedKeysPath: "/var/www/.ssh/authorized_keys"},
@@ -129,7 +128,7 @@ func TestRegister_InvalidToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	logger := telemetry.NewLogger(slog.LevelDebug)
+	logger := telemetry.NewLogger(true)
 	ctx := context.Background()
 
 	_, err := Register(ctx, server.URL, "bad-token", state.HostInfo{
@@ -176,7 +175,7 @@ func TestSync_DesiredStateApplied(t *testing.T) {
 	}))
 	defer server.Close()
 
-	logger := telemetry.NewLogger(slog.LevelDebug)
+	logger := telemetry.NewLogger(true)
 	client := NewClient(server.URL, "host-1", credential, logger)
 
 	ctx := context.Background()
@@ -267,7 +266,7 @@ func TestE2E_SyncAndApply(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	logger := telemetry.NewLogger(slog.LevelDebug)
+	logger := telemetry.NewLogger(true)
 	client := NewClient(server.URL, "host-e2e", credential, logger)
 	ctx := context.Background()
 
@@ -289,7 +288,6 @@ func TestE2E_SyncAndApply(t *testing.T) {
 		t.Fatalf("sync 1 failed: %v", err)
 	}
 
-	// Apply desired state
 	for _, ds := range resp1.DesiredState {
 		for _, u := range cfg.Users {
 			if u.OSUser == ds.OSUser {
@@ -300,7 +298,6 @@ func TestE2E_SyncAndApply(t *testing.T) {
 		}
 	}
 
-	// Verify file
 	content1, _ := os.ReadFile(akPath)
 	s1 := string(content1)
 	if !strings.Contains(s1, "ssh-rsa AAAAB3existing... personal@laptop") {
@@ -345,7 +342,6 @@ func TestE2E_SyncAndApply(t *testing.T) {
 	if strings.Contains(s2, "managed@lockwave") {
 		t.Error("sync 2: managed key should be removed during break-glass")
 	}
-	// Managed block markers should still exist (empty block)
 	if !strings.Contains(s2, authorizedkeys.DefaultBeginMarker) {
 		t.Error("sync 2: managed block markers should remain even when empty")
 	}
@@ -395,7 +391,7 @@ func TestHealthCheck_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	logger := telemetry.NewLogger(slog.LevelDebug)
+	logger := telemetry.NewLogger(true)
 	client := NewClient(server.URL, "host-health", credential, logger)
 
 	ctx := context.Background()
@@ -419,7 +415,7 @@ func TestHealthCheck_Success(t *testing.T) {
 
 func TestHealthCheck_ServerDown(t *testing.T) {
 	// Use a port that's not listening
-	logger := telemetry.NewLogger(slog.LevelDebug)
+	logger := telemetry.NewLogger(true)
 	client := NewClient("http://127.0.0.1:1", "host-fail", "cred", logger)
 
 	ctx := context.Background()

@@ -3,7 +3,6 @@ package update
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,7 +25,7 @@ func TestApply_ChecksumMatch(t *testing.T) {
 
 	// We need to mock os.Executable — we'll test checksum logic directly
 	// Since Apply() calls os.Executable(), we test via the download+hash path
-	logger := telemetry.NewLogger(slog.LevelDebug)
+	logger := telemetry.NewLogger(true)
 
 	// Apply will fail because os.Executable() returns the test binary path
 	// and the version check will fail, but we can verify the checksum logic
@@ -50,7 +49,7 @@ func TestApply_EmptyDownload(t *testing.T) {
 	}))
 	defer server.Close()
 
-	logger := telemetry.NewLogger(slog.LevelDebug)
+	logger := telemetry.NewLogger(true)
 	err := Apply(server.URL, "", logger)
 	if err == nil {
 		t.Fatal("expected error for empty download")
@@ -68,7 +67,7 @@ func TestApply_HTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	logger := telemetry.NewLogger(slog.LevelDebug)
+	logger := telemetry.NewLogger(true)
 	err := Apply(server.URL, "", logger)
 	if err == nil {
 		t.Fatal("expected error for HTTP 404")
@@ -80,7 +79,7 @@ func TestApply_HTTPError(t *testing.T) {
 }
 
 func TestApply_InvalidURL(t *testing.T) {
-	logger := telemetry.NewLogger(slog.LevelDebug)
+	logger := telemetry.NewLogger(true)
 	err := Apply("http://127.0.0.1:0/nonexistent", "", logger)
 	if err == nil {
 		t.Fatal("expected error for unreachable URL")

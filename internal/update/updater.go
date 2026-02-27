@@ -5,12 +5,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 const downloadTimeout = 5 * time.Minute
@@ -19,7 +20,7 @@ const downloadTimeout = 5 * time.Minute
 // If checksum is non-empty, the downloaded binary's SHA-256 is verified against it.
 // The current executable path is resolved via os.Executable(). On success the caller
 // should exit (e.g. os.Exit(0)) so systemd or the process manager restarts the new binary.
-func Apply(url, checksum string, logger *slog.Logger) error {
+func Apply(url, checksum string, logger *logrus.Logger) error {
 	selfPath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("update: resolve executable: %w", err)
@@ -80,9 +81,9 @@ func Apply(url, checksum string, logger *slog.Logger) error {
 			_ = os.Remove(tmpPath)
 			return fmt.Errorf("update: checksum mismatch: expected %s, got %s", checksum, gotHash)
 		}
-		logger.Info("update checksum verified", "sha256", gotHash)
+		logger.WithField("sha256", gotHash).Info("update checksum verified")
 	} else {
-		logger.Warn("update: no checksum provided, skipping verification", "sha256", gotHash)
+		logger.WithField("sha256", gotHash).Warn("update: no checksum provided, skipping verification")
 	}
 
 	// Validate the binary by running "version" subcommand
@@ -91,13 +92,18 @@ func Apply(url, checksum string, logger *slog.Logger) error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("update: binary validation failed (not a valid lockwaved binary): %w: %s", err, string(out))
 	}
-	logger.Debug("update binary validated", "output", string(out))
+	logger.WithField("output", string(out)).Debug("update binary validated")
 
 	if err := os.Rename(tmpPath, selfPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("update: rename over executable: %w", err)
 	}
 
-	logger.Info("update applied", "url", url, "bytes", written, "sha256", gotHash, "path", selfPath)
+	logger.WithFields(logrus.Fields{
+		"url":    url,
+		"bytes":  written,
+		"sha256": gotHash,
+		"path":   selfPath,
+	}).Info("update applied")
 	return nil
 }

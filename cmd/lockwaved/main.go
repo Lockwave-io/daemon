@@ -2,15 +2,16 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"runtime"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/sirupsen/logrus"
+	"github.com/urfave/cli/v3"
 
 	"github.com/lockwave-io/daemon/internal/api"
 	"github.com/lockwave-io/daemon/internal/authorizedkeys"
@@ -25,101 +26,170 @@ import (
 var version = "dev"
 
 func main() {
-	// Subcommand: register
-	registerCmd := flag.NewFlagSet("register", flag.ExitOnError)
-	regToken := registerCmd.String("token", "", "Enrollment token (required)")
-	regAPIURL := registerCmd.String("api-url", "https://lockwave.io", "Lockwave API base URL")
-	regOSUsers := registerCmd.String("os-user", "", "Comma-separated OS users to manage (required)")
-	regAuthorizedKeysPaths := registerCmd.String("authorized-keys-path", "", "Optional comma-separated authorized_keys paths (same order as --os-user)")
-	regPollSecs := registerCmd.Int("poll-seconds", 60, "Polling interval in seconds")
-	regConfigPath := registerCmd.String("config", config.DefaultConfigPath, "Config file path")
-
-	// Default: run daemon
-	runFlags := flag.NewFlagSet("run", flag.ExitOnError)
-	runConfigPath := runFlags.String("config", config.DefaultConfigPath, "Config file path")
-	runDebug := runFlags.Bool("debug", false, "Enable debug logging")
-
-	// Subcommand: configure
-	configureCmd := flag.NewFlagSet("configure", flag.ExitOnError)
-	cfgPath := configureCmd.String("config", config.DefaultConfigPath, "Config file path")
-	cfgAddUser := configureCmd.String("add-user", "", "Add a managed OS user")
-	cfgRemoveUser := configureCmd.String("remove-user", "", "Remove a managed OS user")
-	cfgPollSecs := configureCmd.Int("poll-seconds", 0, "Change poll interval (0 = no change)")
-	cfgAPIURL := configureCmd.String("api-url", "", "Change API URL (empty = no change)")
-
-	// Subcommand: status
-	statusCmd := flag.NewFlagSet("status", flag.ExitOnError)
-	statusConfigPath := statusCmd.String("config", config.DefaultConfigPath, "Config file path")
-
-	// Subcommand: check
-	checkCmd := flag.NewFlagSet("check", flag.ExitOnError)
-	checkConfigPath := checkCmd.String("config", config.DefaultConfigPath, "Config file path")
-
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: lockwaved <register|run|configure|status|check|version> [flags]\n")
-		os.Exit(1)
+	app := &cli.Command{
+		Name:    "lockwaved",
+		Usage:   "Lockwave SSH key sync daemon",
+		Version: version,
+		Commands: []*cli.Command{
+			registerCommand(),
+			runCommand(),
+			configureCommand(),
+			statusCommand(),
+			checkCommand(),
+		},
 	}
 
-	switch os.Args[1] {
-	case "register":
-		if err := registerCmd.Parse(os.Args[2:]); err != nil {
-			os.Exit(1)
-		}
-		if err := runRegister(*regToken, *regAPIURL, *regOSUsers, *regAuthorizedKeysPaths, *regPollSecs, *regConfigPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Registration failed: %v\n", err)
-			os.Exit(1)
-		}
-	case "run":
-		if err := runFlags.Parse(os.Args[2:]); err != nil {
-			os.Exit(1)
-		}
-		level := slog.LevelInfo
-		if *runDebug {
-			level = slog.LevelDebug
-		}
-		if err := runDaemon(*runConfigPath, level); err != nil {
-			fmt.Fprintf(os.Stderr, "Daemon error: %v\n", err)
-			os.Exit(1)
-		}
-	case "configure":
-		if err := configureCmd.Parse(os.Args[2:]); err != nil {
-			os.Exit(1)
-		}
-		if err := runConfigure(*cfgPath, *cfgAddUser, *cfgRemoveUser, *cfgPollSecs, *cfgAPIURL); err != nil {
-			fmt.Fprintf(os.Stderr, "Configure failed: %v\n", err)
-			os.Exit(1)
-		}
-	case "status":
-		if err := statusCmd.Parse(os.Args[2:]); err != nil {
-			os.Exit(1)
-		}
-		if err := runStatus(*statusConfigPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Status failed: %v\n", err)
-			os.Exit(1)
-		}
-	case "check":
-		if err := checkCmd.Parse(os.Args[2:]); err != nil {
-			os.Exit(1)
-		}
-		if err := runCheck(*checkConfigPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Check failed: %v\n", err)
-			os.Exit(1)
-		}
-	case "version":
-		fmt.Printf("lockwaved %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\nUsage: lockwaved <register|run|configure|status|check|version> [flags]\n", os.Args[1]) // #nosec G705 -- CLI error output to stderr, not a web response
+	if err := app.Run(context.Background(), os.Args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func runRegister(token, apiURL, osUsers, authorizedKeysPaths string, pollSecs int, configPath string) error {
-	if token == "" || osUsers == "" {
-		return fmt.Errorf("--token and --os-user are required")
+func registerCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "register",
+		Usage: "Register this host with the Lockwave control plane",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:     "token",
+				Usage:    "Enrollment token (required)",
+				Required: true,
+			},
+			&cli.StringFlag{
+				Name:  "api-url",
+				Usage: "Lockwave API base URL",
+				Value: "https://lockwave.io",
+			},
+			&cli.StringFlag{
+				Name:     "os-user",
+				Usage:    "Comma-separated OS users to manage (required)",
+				Required: true,
+			},
+			&cli.StringFlag{
+				Name:  "authorized-keys-path",
+				Usage: "Optional comma-separated authorized_keys paths (same order as --os-user)",
+			},
+			&cli.IntFlag{
+				Name:  "poll-seconds",
+				Usage: "Polling interval in seconds",
+				Value: 60,
+			},
+			&cli.StringFlag{
+				Name:  "config",
+				Usage: "Config file path",
+				Value: config.DefaultConfigPath,
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			return runRegister(
+				cmd.String("token"),
+				cmd.String("api-url"),
+				cmd.String("os-user"),
+				cmd.String("authorized-keys-path"),
+				int(cmd.Int("poll-seconds")),
+				cmd.String("config"),
+			)
+		},
 	}
+}
 
-	logger := telemetry.NewLogger(slog.LevelInfo)
-	logger.Info("registering host", "api_url", apiURL)
+func runCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "run",
+		Usage: "Start the daemon sync loop",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "config",
+				Usage: "Config file path",
+				Value: config.DefaultConfigPath,
+			},
+			&cli.BoolFlag{
+				Name:  "debug",
+				Usage: "Enable debug logging",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			return runDaemon(cmd.String("config"), cmd.Bool("debug"))
+		},
+	}
+}
+
+func configureCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "configure",
+		Usage: "Modify daemon configuration without re-registering",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "config",
+				Usage: "Config file path",
+				Value: config.DefaultConfigPath,
+			},
+			&cli.StringFlag{
+				Name:  "add-user",
+				Usage: "Add a managed OS user",
+			},
+			&cli.StringFlag{
+				Name:  "remove-user",
+				Usage: "Remove a managed OS user",
+			},
+			&cli.IntFlag{
+				Name:  "poll-seconds",
+				Usage: "Change poll interval (0 = no change)",
+			},
+			&cli.StringFlag{
+				Name:  "api-url",
+				Usage: "Change API URL (empty = no change)",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			return runConfigure(
+				cmd.String("config"),
+				cmd.String("add-user"),
+				cmd.String("remove-user"),
+				int(cmd.Int("poll-seconds")),
+				cmd.String("api-url"),
+			)
+		},
+	}
+}
+
+func statusCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "status",
+		Usage: "Show current daemon configuration and state",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "config",
+				Usage: "Config file path",
+				Value: config.DefaultConfigPath,
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			return runStatus(cmd.String("config"))
+		},
+	}
+}
+
+func checkCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "check",
+		Usage: "Perform a single sync to verify connectivity and exit",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "config",
+				Usage: "Config file path",
+				Value: config.DefaultConfigPath,
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			return runCheck(cmd.String("config"))
+		},
+	}
+}
+
+func runRegister(token, apiURL, osUsers, authorizedKeysPaths string, pollSecs int, configPath string) error {
+	logger := telemetry.NewLogger(false)
+	logger.WithField("api_url", apiURL).Info("registering host")
 
 	hostname, _ := os.Hostname()
 
@@ -157,7 +227,7 @@ func runRegister(token, apiURL, osUsers, authorizedKeysPaths string, pollSecs in
 		return err
 	}
 
-	logger.Info("registration successful", "host_id", resp.HostID)
+	logger.WithField("host_id", resp.HostID).Info("registration successful")
 
 	// Build managed users config (include path so daemon uses it)
 	managedUsers := make([]config.ManagedUser, len(users))
@@ -180,14 +250,17 @@ func runRegister(token, apiURL, osUsers, authorizedKeysPaths string, pollSecs in
 		return fmt.Errorf("save config: %w", err)
 	}
 
-	logger.Info("config saved", "path", configPath)
+	logger.WithField("path", configPath).Info("config saved")
 	fmt.Printf("Host registered successfully.\n  Host ID: %s\n  Config:  %s\n\nStart the daemon with: lockwaved run\n", resp.HostID, configPath)
 	return nil
 }
 
-func runDaemon(configPath string, level slog.Level) error {
-	logger := telemetry.NewLogger(level)
-	logger.Info("starting lockwaved", "version", version, "config", configPath)
+func runDaemon(configPath string, debug bool) error {
+	logger := telemetry.NewLogger(debug)
+	logger.WithFields(logrus.Fields{
+		"version": version,
+		"config":  configPath,
+	}).Info("starting lockwaved")
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -205,7 +278,7 @@ func runDaemon(configPath string, level slog.Level) error {
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		sig := <-sigCh
-		logger.Info("received signal, shutting down", "signal", sig)
+		logger.WithField("signal", sig).Info("received signal, shutting down")
 		cancel()
 	}()
 
@@ -214,7 +287,7 @@ func runDaemon(configPath string, level slog.Level) error {
 	var lastDrift bool
 	currentPollSecs := cfg.PollSecs
 
-	logger.Info("entering sync loop", "poll_seconds", currentPollSecs)
+	logger.WithField("poll_seconds", currentPollSecs).Info("entering sync loop")
 
 	// Initial sync immediately, then poll
 	ticker := time.NewTicker(time.Duration(currentPollSecs) * time.Second)
@@ -224,7 +297,7 @@ func runDaemon(configPath string, level slog.Level) error {
 	for {
 		resp, syncErr := doSync(ctx, client, cfg, configPath, logger, lastResult, lastDrift, detector)
 		if syncErr != nil {
-			logger.Error("sync failed", "error", syncErr)
+			logger.WithError(syncErr).Error("sync failed")
 			lastResult = "failure"
 		} else {
 			lastResult = "success"
@@ -236,19 +309,29 @@ func runDaemon(configPath string, level slog.Level) error {
 				if newPoll < 10 {
 					newPoll = 10
 				}
-				logger.Info("server updated poll interval", "old_seconds", currentPollSecs, "new_seconds", newPoll)
+				logger.WithFields(logrus.Fields{
+					"old_seconds": currentPollSecs,
+					"new_seconds": newPoll,
+				}).Info("server updated poll interval")
 				currentPollSecs = newPoll
 				ticker.Reset(time.Duration(currentPollSecs) * time.Second)
 			}
 
-			if resp != nil && resp.Update != nil && resp.Update.Version != version && version != "dev" {
-				logger.Info("update available", "current", version, "target", resp.Update.Version)
+			// Check auto_update flag from config section (defaults to true if no config)
+			autoUpdate := resp == nil || resp.Config == nil || resp.Config.AutoUpdate
+			if autoUpdate && resp != nil && resp.Update != nil && resp.Update.Version != version && version != "dev" {
+				logger.WithFields(logrus.Fields{
+					"current": version,
+					"target":  resp.Update.Version,
+				}).Info("update available")
 				if err := update.Apply(resp.Update.URL, resp.Update.Checksum, logger); err != nil {
-					logger.Warn("update failed, continuing", "error", err)
+					logger.WithError(err).Warn("update failed, continuing")
 				} else {
 					logger.Info("update applied, exiting for restart")
 					os.Exit(0)
 				}
+			} else if !autoUpdate && resp != nil && resp.Update != nil {
+				logger.WithField("target", resp.Update.Version).Debug("update available but auto-update disabled")
 			}
 		}
 
@@ -262,17 +345,23 @@ func runDaemon(configPath string, level slog.Level) error {
 	}
 }
 
-func doSync(ctx context.Context, client *api.Client, cfg *config.Config, configPath string, logger *slog.Logger, lastResult string, driftDetected bool, detector *drift.Detector) (*state.SyncResponse, error) {
+func doSync(ctx context.Context, client *api.Client, cfg *config.Config, configPath string, logger *logrus.Logger, lastResult string, driftDetected bool, detector *drift.Detector) (*state.SyncResponse, error) {
 	// Check for drift before sending sync request
 	for _, u := range cfg.Users {
 		path := u.ResolveAuthorizedKeysPath()
 		drifted, err := detector.Check(u.OSUser, path)
 		if err != nil {
-			logger.Warn("drift check failed", "user", u.OSUser, "error", err)
+			logger.WithFields(logrus.Fields{
+				"user":  u.OSUser,
+				"error": err,
+			}).Warn("drift check failed")
 			continue
 		}
 		if drifted {
-			logger.Warn("drift detected: managed block was modified externally", "user", u.OSUser, "path", path)
+			logger.WithFields(logrus.Fields{
+				"user": u.OSUser,
+				"path": path,
+			}).Warn("drift detected: managed block was modified externally")
 			driftDetected = true
 		}
 	}
@@ -283,7 +372,11 @@ func doSync(ctx context.Context, client *api.Client, cfg *config.Config, configP
 		path := u.ResolveAuthorizedKeysPath()
 		parsed, err := authorizedkeys.Parse(path)
 		if err != nil {
-			logger.Warn("failed to parse authorized_keys", "user", u.OSUser, "path", path, "error", err)
+			logger.WithFields(logrus.Fields{
+				"user":  u.OSUser,
+				"path":  path,
+				"error": err,
+			}).Warn("failed to parse authorized_keys")
 			observed = append(observed, state.Observed{
 				OSUser:                  u.OSUser,
 				ManagedBlockPresent:     false,
@@ -319,10 +412,10 @@ func doSync(ctx context.Context, client *api.Client, cfg *config.Config, configP
 		return nil, err
 	}
 
-	logger.Info("sync response received",
-		"break_glass", resp.HostPolicy.BreakGlass.Active,
-		"desired_users", len(resp.DesiredState),
-	)
+	logger.WithFields(logrus.Fields{
+		"break_glass":   resp.HostPolicy.BreakGlass.Active,
+		"desired_users": len(resp.DesiredState),
+	}).Info("sync response received")
 
 	// Apply desired state for each managed user
 	for _, ds := range resp.DesiredState {
@@ -334,22 +427,32 @@ func doSync(ctx context.Context, client *api.Client, cfg *config.Config, configP
 			}
 		}
 		if user == nil {
-			logger.Warn("server returned state for unknown user", "os_user", ds.OSUser)
+			logger.WithField("os_user", ds.OSUser).Warn("server returned state for unknown user")
 			continue
 		}
 
 		path := user.ResolveAuthorizedKeysPath()
 		if err := authorizedkeys.Apply(path, ds.AuthorizedKeys); err != nil {
-			logger.Error("failed to apply authorized_keys", "user", ds.OSUser, "path", path, "error", err)
+			logger.WithFields(logrus.Fields{
+				"user":  ds.OSUser,
+				"path":  path,
+				"error": err,
+			}).Error("failed to apply authorized_keys")
 			continue
 		}
 
 		// Record post-apply hash for drift detection
 		if err := detector.RecordApplied(ds.OSUser, path); err != nil {
-			logger.Warn("failed to record post-apply hash", "user", ds.OSUser, "error", err)
+			logger.WithFields(logrus.Fields{
+				"user":  ds.OSUser,
+				"error": err,
+			}).Warn("failed to record post-apply hash")
 		}
 
-		logger.Info("applied authorized_keys", "user", ds.OSUser, "keys", len(ds.AuthorizedKeys))
+		logger.WithFields(logrus.Fields{
+			"user": ds.OSUser,
+			"keys": len(ds.AuthorizedKeys),
+		}).Info("applied authorized_keys")
 	}
 
 	// Handle credential rotation if server provides one
@@ -357,11 +460,96 @@ func doSync(ctx context.Context, client *api.Client, cfg *config.Config, configP
 		logger.Info("credential rotation received, updating config")
 		cfg.Credential = *resp.CredentialRotation
 		if err := config.Save(configPath, cfg); err != nil {
-			logger.Error("failed to save rotated credential", "error", err)
+			logger.WithError(err).Error("failed to save rotated credential")
 		}
 	}
 
+	// Reconcile config from control plane
+	if resp.Config != nil {
+		reconcileConfig(cfg, resp.Config, configPath, logger, detector)
+	}
+
 	return resp, nil
+}
+
+// reconcileConfig applies server-pushed config changes to the local config file.
+func reconcileConfig(cfg *config.Config, sc *state.SyncConfig, configPath string, logger *logrus.Logger, detector *drift.Detector) {
+	configChanged := false
+
+	// Build a map of current users for quick lookup
+	currentUsers := make(map[string]config.ManagedUser, len(cfg.Users))
+	for _, u := range cfg.Users {
+		currentUsers[u.OSUser] = u
+	}
+
+	// Build a map of server-desired users
+	serverUsers := make(map[string]state.ConfigUser, len(sc.ManagedUsers))
+	for _, u := range sc.ManagedUsers {
+		serverUsers[u.OSUser] = u
+	}
+
+	// Detect removed users and strip their managed blocks
+	for _, u := range cfg.Users {
+		if _, exists := serverUsers[u.OSUser]; !exists {
+			path := u.ResolveAuthorizedKeysPath()
+			logger.WithField("os_user", u.OSUser).Info("removing managed user per server config")
+			if err := authorizedkeys.StripManagedBlock(path); err != nil {
+				logger.WithFields(logrus.Fields{
+					"os_user": u.OSUser,
+					"error":   err,
+				}).Warn("failed to strip managed block for removed user")
+			}
+			configChanged = true
+		}
+	}
+
+	// Build new user list from server config
+	if len(sc.ManagedUsers) > 0 {
+		newUsers := make([]config.ManagedUser, 0, len(sc.ManagedUsers))
+		for _, su := range sc.ManagedUsers {
+			newUsers = append(newUsers, config.ManagedUser{
+				OSUser:             su.OSUser,
+				AuthorizedKeysPath: su.AuthorizedKeysPath,
+			})
+		}
+		// Check if users actually changed
+		if !managedUsersEqual(cfg.Users, newUsers) {
+			cfg.Users = newUsers
+			configChanged = true
+			logger.WithField("count", len(newUsers)).Info("managed users updated from server config")
+		}
+	}
+
+	// Reconcile poll interval
+	if sc.PollSeconds > 0 && sc.PollSeconds != cfg.PollSecs {
+		logger.WithFields(logrus.Fields{
+			"old": cfg.PollSecs,
+			"new": sc.PollSeconds,
+		}).Info("poll interval updated from server config")
+		cfg.PollSecs = sc.PollSeconds
+		configChanged = true
+	}
+
+	if configChanged {
+		if err := config.Save(configPath, cfg); err != nil {
+			logger.WithError(err).Error("failed to save reconciled config")
+		} else {
+			logger.Info("config saved after server reconciliation")
+		}
+	}
+}
+
+// managedUsersEqual checks if two managed user slices are equivalent.
+func managedUsersEqual(a []config.ManagedUser, b []config.ManagedUser) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].OSUser != b[i].OSUser || a[i].AuthorizedKeysPath != b[i].AuthorizedKeysPath {
+			return false
+		}
+	}
+	return true
 }
 
 // runConfigure modifies the daemon config without re-registering.
@@ -476,7 +664,7 @@ func runStatus(configPath string) error {
 
 // runCheck performs a single sync to verify connectivity and exits.
 func runCheck(configPath string) error {
-	logger := telemetry.NewLogger(slog.LevelInfo)
+	logger := telemetry.NewLogger(false)
 
 	cfg, err := config.Load(configPath)
 	if err != nil {

@@ -149,6 +149,25 @@ jobs:
               --content-type "text/plain"
           fi
 
+      - name: Verify S3 upload
+        env:
+          HETZNER_S3_ENDPOINT: ${{ secrets.HETZNER_S3_ENDPOINT }}
+          HETZNER_S3_BUCKET: ${{ secrets.HETZNER_S3_BUCKET }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          ENDPOINT="${HETZNER_S3_ENDPOINT#http://}"
+          ENDPOINT="${ENDPOINT#https://}"
+          ENDPOINT="https://${ENDPOINT}"
+
+          echo "==> Bucket: $HETZNER_S3_BUCKET"
+          echo "==> Listing releases/lockwaved/$VERSION/:"
+          aws s3 ls "s3://$HETZNER_S3_BUCKET/releases/lockwaved/$VERSION/" \
+            --endpoint-url "$ENDPOINT" --region eu-central-1
+          echo ""
+          echo "==> Listing releases/lockwaved/latest/:"
+          aws s3 ls "s3://$HETZNER_S3_BUCKET/releases/lockwaved/latest/" \
+            --endpoint-url "$ENDPOINT" --region eu-central-1
+
   release:
     needs: build
     runs-on: ubuntu-latest

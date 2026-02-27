@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,11 +12,32 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/lockwave-io/daemon/internal/authorizedkeys"
 	"github.com/lockwave-io/daemon/internal/config"
 	"github.com/lockwave-io/daemon/internal/state"
 	"github.com/lockwave-io/daemon/internal/telemetry"
 )
+
+// generateTestPublicKey returns a valid authorized_keys-format line for a
+// freshly generated ed25519 key with the given comment.
+func generateTestPublicKey(t *testing.T, comment string) string {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ed25519 key: %v", err)
+	}
+	pub, err := ssh.NewPublicKey(priv.Public())
+	if err != nil {
+		t.Fatalf("ssh.NewPublicKey: %v", err)
+	}
+	line := strings.TrimRight(string(ssh.MarshalAuthorizedKey(pub)), "\n")
+	if comment != "" {
+		line += " " + comment
+	}
+	return line
+}
 
 func TestRegister_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -209,6 +232,10 @@ func TestSync_DesiredStateApplied(t *testing.T) {
 func TestE2E_SyncAndApply(t *testing.T) {
 	credential := "e2e-test-credential"
 
+	// Generate a real SSH key to use as the managed key in server responses.
+	// This key will survive validateAndNormalizePublicKey in authorizedkeys.Apply.
+	managedKey := generateTestPublicKey(t, "managed@lockwave")
+
 	// Track which sync call we're on
 	callCount := 0
 
@@ -225,7 +252,7 @@ func TestE2E_SyncAndApply(t *testing.T) {
 				DesiredState: []state.DesiredState{{
 					OSUser: "deploy",
 					AuthorizedKeys: []state.AuthorizedKey{
-						{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKey1 managed@lockwave"},
+						{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: managedKey},
 					},
 				}},
 			})
@@ -247,7 +274,7 @@ func TestE2E_SyncAndApply(t *testing.T) {
 				DesiredState: []state.DesiredState{{
 					OSUser: "deploy",
 					AuthorizedKeys: []state.AuthorizedKey{
-						{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKey1 managed@lockwave"},
+						{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: managedKey},
 					},
 				}},
 			})
@@ -255,14 +282,17 @@ func TestE2E_SyncAndApply(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Set up temp authorized_keys with an existing unmanaged key
+	// Set up temp authorized_keys with an existing unmanaged key.
+	// Write it directly via os.WriteFile so validation doesn't apply to the
+	// pre-existing personal key (it may be a placeholder in a real file).
+	unmanagedKey := generateTestPublicKey(t, "personal@laptop")
 	dir := t.TempDir()
 	sshDir := filepath.Join(dir, ".ssh")
 	if err := os.MkdirAll(sshDir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	akPath := filepath.Join(sshDir, "authorized_keys")
-	if err := os.WriteFile(akPath, []byte("ssh-rsa AAAAB3existing... personal@laptop\n"), 0o600); err != nil {
+	if err := os.WriteFile(akPath, []byte(unmanagedKey+"\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -300,10 +330,13 @@ func TestE2E_SyncAndApply(t *testing.T) {
 
 	content1, _ := os.ReadFile(akPath)
 	s1 := string(content1)
-	if !strings.Contains(s1, "ssh-rsa AAAAB3existing... personal@laptop") {
+	// Unmanaged key must survive (identified by its unique comment).
+	if !strings.Contains(s1, "personal@laptop") {
 		t.Error("sync 1: unmanaged key was lost")
 	}
-	if !strings.Contains(s1, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKey1 managed@lockwave # lockwave:k1") {
+	// Managed key is identified by its lockwave annotation; the comment field
+	// is stripped during normalization by ssh.MarshalAuthorizedKey.
+	if !strings.Contains(s1, "# lockwave:k1") {
 		t.Error("sync 1: managed key not written")
 	}
 	if !strings.Contains(s1, authorizedkeys.DefaultBeginMarker) {
@@ -314,7 +347,7 @@ func TestE2E_SyncAndApply(t *testing.T) {
 	resp2, err := client.Sync(ctx, &state.SyncRequest{
 		HostID:   "host-e2e",
 		Status:   state.HostStatus{LastApplyResult: "success"},
-		Observed: []state.Observed{{OSUser: "deploy", ManagedBlockPresent: true, ManagedKeysFingerprints: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKey1"}}},
+		Observed: []state.Observed{{OSUser: "deploy", ManagedBlockPresent: true, ManagedKeysFingerprints: []string{}}},
 	})
 	if err != nil {
 		t.Fatalf("sync 2 failed: %v", err)
@@ -336,10 +369,11 @@ func TestE2E_SyncAndApply(t *testing.T) {
 
 	content2, _ := os.ReadFile(akPath)
 	s2 := string(content2)
-	if !strings.Contains(s2, "ssh-rsa AAAAB3existing... personal@laptop") {
+	if !strings.Contains(s2, "personal@laptop") {
 		t.Error("sync 2: unmanaged key was lost during break-glass")
 	}
-	if strings.Contains(s2, "managed@lockwave") {
+	// The managed key annotation must be absent during break-glass.
+	if strings.Contains(s2, "# lockwave:k1") {
 		t.Error("sync 2: managed key should be removed during break-glass")
 	}
 	if !strings.Contains(s2, authorizedkeys.DefaultBeginMarker) {
@@ -368,10 +402,10 @@ func TestE2E_SyncAndApply(t *testing.T) {
 
 	content3, _ := os.ReadFile(akPath)
 	s3 := string(content3)
-	if !strings.Contains(s3, "ssh-rsa AAAAB3existing... personal@laptop") {
+	if !strings.Contains(s3, "personal@laptop") {
 		t.Error("sync 3: unmanaged key was lost")
 	}
-	if !strings.Contains(s3, "managed@lockwave # lockwave:k1") {
+	if !strings.Contains(s3, "# lockwave:k1") {
 		t.Error("sync 3: managed key should return after break-glass deactivation")
 	}
 }

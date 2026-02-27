@@ -1,14 +1,37 @@
 package drift
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/lockwave-io/daemon/internal/authorizedkeys"
 	"github.com/lockwave-io/daemon/internal/state"
 )
+
+// generateTestPublicKey returns a valid authorized_keys-format line for a
+// freshly generated ed25519 key with the given comment.
+func generateTestPublicKey(t *testing.T, comment string) string {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ed25519 key: %v", err)
+	}
+	pub, err := ssh.NewPublicKey(priv.Public())
+	if err != nil {
+		t.Fatalf("ssh.NewPublicKey: %v", err)
+	}
+	line := strings.TrimRight(string(ssh.MarshalAuthorizedKey(pub)), "\n")
+	if comment != "" {
+		line += " " + comment
+	}
+	return line
+}
 
 func writeAuthorizedKeys(t *testing.T, path string, keys []state.AuthorizedKey) {
 	t.Helper()
@@ -37,7 +60,7 @@ func TestDetector_NoDriftAfterApply(t *testing.T) {
 	path := filepath.Join(dir, "authorized_keys")
 
 	keys := []state.AuthorizedKey{
-		{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: "ssh-ed25519 AAAAC3 test@host"},
+		{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: generateTestPublicKey(t, "test@host")},
 	}
 	writeAuthorizedKeys(t, path, keys)
 
@@ -61,7 +84,7 @@ func TestDetector_DriftAfterExternalEdit(t *testing.T) {
 	path := filepath.Join(dir, "authorized_keys")
 
 	keys := []state.AuthorizedKey{
-		{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: "ssh-ed25519 AAAAC3 test@host"},
+		{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: generateTestPublicKey(t, "test@host")},
 	}
 	writeAuthorizedKeys(t, path, keys)
 
@@ -96,7 +119,7 @@ func TestDetector_DriftAfterFileDeleted(t *testing.T) {
 	path := filepath.Join(dir, "authorized_keys")
 
 	keys := []state.AuthorizedKey{
-		{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: "ssh-ed25519 AAAAC3 test@host"},
+		{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: generateTestPublicKey(t, "test@host")},
 	}
 	writeAuthorizedKeys(t, path, keys)
 
@@ -126,10 +149,10 @@ func TestDetector_MultipleUsers(t *testing.T) {
 	pathB := filepath.Join(dir, "ak_www")
 
 	keysA := []state.AuthorizedKey{
-		{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: "ssh-ed25519 AAAAC3 deploy@host"},
+		{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: generateTestPublicKey(t, "deploy@host")},
 	}
 	keysB := []state.AuthorizedKey{
-		{KeyID: "k2", FingerprintSHA256: "SHA256:def", PublicKey: "ssh-ed25519 AAAAC4 www@host"},
+		{KeyID: "k2", FingerprintSHA256: "SHA256:def", PublicKey: generateTestPublicKey(t, "www@host")},
 	}
 
 	writeAuthorizedKeys(t, pathA, keysA)
@@ -169,7 +192,7 @@ func TestDetector_Reset(t *testing.T) {
 	path := filepath.Join(dir, "authorized_keys")
 
 	keys := []state.AuthorizedKey{
-		{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: "ssh-ed25519 AAAAC3 test@host"},
+		{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: generateTestPublicKey(t, "test@host")},
 	}
 	writeAuthorizedKeys(t, path, keys)
 	if err := d.RecordApplied("deploy", path); err != nil {
@@ -220,7 +243,7 @@ func TestHashManagedBlock_Deterministic(t *testing.T) {
 	path := filepath.Join(dir, "authorized_keys")
 
 	keys := []state.AuthorizedKey{
-		{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: "ssh-ed25519 AAAAC3 test@host"},
+		{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: generateTestPublicKey(t, "test@host")},
 	}
 	writeAuthorizedKeys(t, path, keys)
 

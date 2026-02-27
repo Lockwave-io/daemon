@@ -8,9 +8,26 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/lockwave-io/daemon/internal/state"
 	"github.com/lockwave-io/daemon/internal/system"
 )
+
+// validateAndNormalizePublicKey parses a raw SSH public key string using the
+// ssh package and re-serializes it via MarshalAuthorizedKey. This strips any
+// injected authorized_keys options (e.g. command=, environment=) that could
+// allow privilege escalation. Returns an error if the key cannot be parsed.
+func validateAndNormalizePublicKey(raw string) (string, error) {
+	pubKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(raw))
+	if err != nil {
+		return "", fmt.Errorf("authorizedkeys: invalid SSH public key: %w", err)
+	}
+	// MarshalAuthorizedKey appends a trailing newline; trim it so the caller
+	// controls line formatting.
+	normalized := strings.TrimRight(string(ssh.MarshalAuthorizedKey(pubKey)), "\n")
+	return normalized, nil
+}
 
 // Apply writes the desired state to the authorized_keys file using atomic write.
 // It preserves any keys outside the managed block.
@@ -30,8 +47,12 @@ func Apply(path string, keys []state.AuthorizedKey) error {
 	// Managed block
 	lines = append(lines, DefaultBeginMarker)
 	for _, key := range keys {
+		normalized, err := validateAndNormalizePublicKey(key.PublicKey)
+		if err != nil {
+			return fmt.Errorf("authorizedkeys: key %s: %w", key.KeyID, err)
+		}
 		// Format: <public_key> # lockwave:<key_id>
-		line := fmt.Sprintf("%s # lockwave:%s", key.PublicKey, key.KeyID)
+		line := fmt.Sprintf("%s # lockwave:%s", normalized, key.KeyID)
 		lines = append(lines, line)
 	}
 	lines = append(lines, DefaultEndMarker)
@@ -107,11 +128,16 @@ func StripManagedBlock(path string) error {
 }
 
 // RenderManagedBlock produces just the managed block content (for testing/display).
+// Keys that fail validation are skipped rather than written.
 func RenderManagedBlock(keys []state.AuthorizedKey) string {
 	var lines []string
 	lines = append(lines, DefaultBeginMarker)
 	for _, key := range keys {
-		line := fmt.Sprintf("%s # lockwave:%s", key.PublicKey, key.KeyID)
+		normalized, err := validateAndNormalizePublicKey(key.PublicKey)
+		if err != nil {
+			continue
+		}
+		line := fmt.Sprintf("%s # lockwave:%s", normalized, key.KeyID)
 		lines = append(lines, line)
 	}
 	lines = append(lines, DefaultEndMarker)

@@ -15,6 +15,16 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// tempFilePerms is the permission used while the downloaded binary is being
+// written and validated. Only the daemon user may access it during this
+// window, preventing other processes from racing on the file.
+const tempFilePerms = 0o700
+
+// finalFilePerms is the permission applied to the temp file immediately before
+// it is atomically renamed over the running executable. This matches the
+// expected permissions of an installed daemon binary.
+const finalFilePerms = 0o755
+
 const downloadTimeout = 5 * time.Minute
 
 // Apply downloads the binary from url and atomically replaces the current executable.
@@ -37,23 +47,39 @@ func Apply(url, checksum string, logger *logrus.Logger) error {
 	}
 
 	dir := filepath.Dir(selfPath)
-	tmpPath := filepath.Join(dir, ".lockwaved.new."+fmt.Sprintf("%d", os.Getpid()))
+
+	// Use os.CreateTemp with a random suffix to avoid predictable temp paths
+	// and eliminate the TOCTOU window that a fixed pid-based name would create.
+	// #nosec G304 -- dir is derived from os.Executable(), not user input
+	tmpFile, err := os.CreateTemp(dir, ".lockwaved.new.*")
+	if err != nil {
+		return fmt.Errorf("update: create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	// Restrict access to the daemon user only while the file is being written
+	// and validated. This prevents other processes from reading or executing
+	// the partially-written binary during the validation window.
+	if err := tmpFile.Chmod(tempFilePerms); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("update: chmod temp file: %w", err)
+	}
 
 	client := &http.Client{Timeout: downloadTimeout}
 	resp, err := client.Get(url)
 	if err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("update: download %s: %w", url, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("update: download returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	tmpFile, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755) // #nosec G302 G304 -- binary must be executable; path is constructed from os.Executable() dir, not user input
-	if err != nil {
-		return fmt.Errorf("update: create temp file: %w", err)
 	}
 
 	// Write to temp file while computing hash
@@ -93,12 +119,20 @@ func Apply(url, checksum string, logger *logrus.Logger) error {
 	logger.WithField("sha256", gotHash).Info("update checksum verified")
 
 	// Validate the binary by running "version" subcommand
-	out, err := exec.Command(tmpPath, "version").CombinedOutput() // #nosec G204 -- tmpPath is constructed internally from os.Executable() dir, not user input
+	out, err := exec.Command(tmpPath, "version").CombinedOutput() // #nosec G204 -- tmpPath is from os.CreateTemp in the executable's own directory, not user input
 	if err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("update: binary validation failed (not a valid lockwaved binary): %w: %s", err, string(out))
 	}
 	logger.WithField("output", string(out)).Debug("update binary validated")
+
+	// Widen permissions to world-executable before the atomic rename so the
+	// installed binary has the expected 0o755 mode from the very first moment
+	// it replaces the running executable.
+	if err := os.Chmod(tmpPath, finalFilePerms); err != nil { // #nosec G302 -- binary must be world-executable
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("update: chmod final temp file: %w", err)
+	}
 
 	if err := os.Rename(tmpPath, selfPath); err != nil {
 		_ = os.Remove(tmpPath)

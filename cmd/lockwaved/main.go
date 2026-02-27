@@ -315,6 +315,8 @@ func runDaemon(configPath string, debug bool) error {
 	lastResult := "pending"
 	var lastDrift bool
 	currentPollSecs := cfg.PollSecs
+	consecutiveFailures := 0
+	const maxBackoffSecs = 300 // 5 minutes
 
 	// Determine if we're in the 2-minute fast-sync window after registration
 	fastSyncUntil := time.Time{}
@@ -342,11 +344,29 @@ func runDaemon(configPath string, debug bool) error {
 
 	// Run sync immediately on start, then on ticker
 	for {
-		resp, syncErr := doSync(ctx, client, cfg, configPath, logger, lastResult, lastDrift, detector)
+		syncCtx, syncCancel := context.WithTimeout(ctx, 30*time.Second)
+		resp, syncErr := doSync(syncCtx, client, cfg, configPath, logger, lastResult, lastDrift, detector)
+		syncCancel()
 		if syncErr != nil {
-			logger.WithError(syncErr).Error("sync failed")
+			consecutiveFailures++
+			logger.WithError(syncErr).WithField("consecutive_failures", consecutiveFailures).Error("sync failed")
 			lastResult = "failure"
+
+			// Exponential backoff: 2^failures * base poll, capped at 5 min
+			backoffSecs := currentPollSecs * (1 << min(consecutiveFailures, 5))
+			if backoffSecs > maxBackoffSecs {
+				backoffSecs = maxBackoffSecs
+			}
+			if backoffSecs > currentPollSecs {
+				logger.WithField("backoff_seconds", backoffSecs).Warn("applying backoff due to repeated failures")
+				ticker.Reset(time.Duration(backoffSecs) * time.Second)
+			}
 		} else {
+			if consecutiveFailures > 0 {
+				logger.WithField("recovered_after", consecutiveFailures).Info("sync recovered")
+				ticker.Reset(time.Duration(currentPollSecs) * time.Second)
+			}
+			consecutiveFailures = 0
 			lastResult = "success"
 			lastDrift = false
 
@@ -355,6 +375,10 @@ func runDaemon(configPath string, debug bool) error {
 				desiredPoll := resp.HostPolicy.PollSeconds
 				if desiredPoll < 10 {
 					desiredPoll = 10
+				}
+				if desiredPoll > 3600 {
+					logger.WithField("server_value", desiredPoll).Warn("server poll interval exceeds 1h cap, clamping to 3600s")
+					desiredPoll = 3600
 				}
 				// During fast-sync window, cap at 10 seconds
 				if inFastSync() && desiredPoll > 10 {
@@ -518,6 +542,9 @@ func doSync(ctx context.Context, client *api.Client, cfg *config.Config, configP
 		cfg.Credential = *resp.CredentialRotation
 		if err := config.Save(configPath, cfg); err != nil {
 			logger.WithError(err).Error("failed to save rotated credential")
+		} else {
+			client.RotateCredential(*resp.CredentialRotation)
+			logger.Info("credential rotated for subsequent requests")
 		}
 	}
 

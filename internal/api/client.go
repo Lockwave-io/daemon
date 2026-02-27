@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,10 @@ import (
 	"github.com/lockwave-io/daemon/internal/auth"
 	"github.com/lockwave-io/daemon/internal/state"
 )
+
+// maxResponseBytes caps the size of any response body read from the control
+// plane to prevent a malicious or misbehaving server from exhausting memory.
+const maxResponseBytes = 1 << 20 // 1 MiB
 
 // Client communicates with the Lockwave control plane.
 type Client struct {
@@ -50,6 +55,11 @@ func NewClient(baseURL, hostID, credential string, logger *logrus.Logger) *Clien
 		signer:  auth.NewSigner(credential),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					MinVersion: tls.VersionTLS12,
+				},
+			},
 		},
 		logger: logger,
 	}
@@ -80,14 +90,21 @@ func Register(ctx context.Context, apiURL, token string, hostInfo state.HostInfo
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			},
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("api: register request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return nil, fmt.Errorf("api: read register response: %w", err)
 	}
@@ -102,6 +119,11 @@ func Register(ctx context.Context, apiURL, token string, hostInfo state.HostInfo
 	}
 
 	return &result, nil
+}
+
+// RotateCredential updates the client's signing credential for subsequent requests.
+func (c *Client) RotateCredential(newCredential string) {
+	c.signer = auth.NewSigner(newCredential)
 }
 
 // Sync sends the current host status and retrieves desired state.
@@ -174,7 +196,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, endpoint, path string,
 			continue
 		}
 
-		respBody, err := io.ReadAll(resp.Body)
+		respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 		_ = resp.Body.Close()
 		if err != nil {
 			c.logger.WithFields(logrus.Fields{

@@ -77,7 +77,9 @@ func TestDetector_DriftAfterExternalEdit(t *testing.T) {
 		"ssh-rsa AAAAB3rogue rogue@attacker\n"+authorizedkeys.DefaultEndMarker,
 		1,
 	)
-	os.WriteFile(path, []byte(modified), 0o600)
+	if err := os.WriteFile(path, []byte(modified), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 
 	drifted, err := d.Check("deploy", path)
 	if err != nil {
@@ -103,7 +105,9 @@ func TestDetector_DriftAfterFileDeleted(t *testing.T) {
 	}
 
 	// Delete the file — managed block is gone
-	os.Remove(path)
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
 
 	drifted, err := d.Check("deploy", path)
 	if err != nil {
@@ -131,8 +135,12 @@ func TestDetector_MultipleUsers(t *testing.T) {
 	writeAuthorizedKeys(t, pathA, keysA)
 	writeAuthorizedKeys(t, pathB, keysB)
 
-	d.RecordApplied("deploy", pathA)
-	d.RecordApplied("www", pathB)
+	if err := d.RecordApplied("deploy", pathA); err != nil {
+		t.Fatalf("record deploy: %v", err)
+	}
+	if err := d.RecordApplied("www", pathB); err != nil {
+		t.Fatalf("record www: %v", err)
+	}
 
 	// No drift for either
 	dA, _ := d.Check("deploy", pathA)
@@ -142,7 +150,9 @@ func TestDetector_MultipleUsers(t *testing.T) {
 	}
 
 	// Edit only deploy's file
-	os.Remove(pathA)
+	if err := os.Remove(pathA); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
 	dA, _ = d.Check("deploy", pathA)
 	dB, _ = d.Check("www", pathB)
 	if !dA {
@@ -162,10 +172,14 @@ func TestDetector_Reset(t *testing.T) {
 		{KeyID: "k1", FingerprintSHA256: "SHA256:abc", PublicKey: "ssh-ed25519 AAAAC3 test@host"},
 	}
 	writeAuthorizedKeys(t, path, keys)
-	d.RecordApplied("deploy", path)
+	if err := d.RecordApplied("deploy", path); err != nil {
+		t.Fatalf("record: %v", err)
+	}
 
 	// Delete file to create drift
-	os.Remove(path)
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
 
 	// Reset clears baseline — so no drift reported
 	d.Reset()
@@ -188,7 +202,9 @@ func TestHashManagedBlock_NoFile(t *testing.T) {
 func TestHashManagedBlock_NoManagedBlock(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "authorized_keys")
-	os.WriteFile(path, []byte("ssh-rsa AAAAB3 user@laptop\n"), 0o600)
+	if err := os.WriteFile(path, []byte("ssh-rsa AAAAB3 user@laptop\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 
 	h, err := authorizedkeys.HashManagedBlock(path)
 	if err != nil {

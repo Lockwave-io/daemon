@@ -20,7 +20,7 @@ func TestApply_ChecksumMatch(t *testing.T) {
 	checksum := hex.EncodeToString(h[:])
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(binaryContent)
+		_, _ = w.Write(binaryContent)
 	}))
 	defer server.Close()
 
@@ -64,7 +64,7 @@ func TestApply_EmptyDownload(t *testing.T) {
 func TestApply_HTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 	}))
 	defer server.Close()
 
@@ -96,7 +96,9 @@ func TestChecksumComputation(t *testing.T) {
 	// Write to temp file and verify
 	dir := t.TempDir()
 	path := filepath.Join(dir, "binary")
-	os.WriteFile(path, data, 0o755)
+	if err := os.WriteFile(path, data, 0o755); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 
 	content, _ := os.ReadFile(path)
 	h2 := sha256.Sum256(content)

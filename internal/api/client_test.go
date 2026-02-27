@@ -154,7 +154,7 @@ func TestSync_DesiredStateApplied(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(state.SyncResponse{
+		_ = json.NewEncoder(w).Encode(state.SyncResponse{
 			ServerTime: "2026-02-26T12:00:00Z",
 			HostPolicy: state.HostPolicy{
 				PollSeconds: 60,
@@ -220,7 +220,7 @@ func TestE2E_SyncAndApply(t *testing.T) {
 		switch callCount {
 		case 1:
 			// First sync: return one key
-			json.NewEncoder(w).Encode(state.SyncResponse{
+			_ = json.NewEncoder(w).Encode(state.SyncResponse{
 				ServerTime: "2026-02-26T12:00:00Z",
 				HostPolicy: state.HostPolicy{PollSeconds: 60, BreakGlass: state.BreakGlass{Active: false}},
 				DesiredState: []state.DesiredState{{
@@ -232,7 +232,7 @@ func TestE2E_SyncAndApply(t *testing.T) {
 			})
 		case 2:
 			// Second sync: break-glass active, empty desired state
-			json.NewEncoder(w).Encode(state.SyncResponse{
+			_ = json.NewEncoder(w).Encode(state.SyncResponse{
 				ServerTime: "2026-02-26T12:01:00Z",
 				HostPolicy: state.HostPolicy{PollSeconds: 60, BreakGlass: state.BreakGlass{Active: true, Scope: strPtr("team")}},
 				DesiredState: []state.DesiredState{{
@@ -242,7 +242,7 @@ func TestE2E_SyncAndApply(t *testing.T) {
 			})
 		case 3:
 			// Third sync: break-glass deactivated, key returns
-			json.NewEncoder(w).Encode(state.SyncResponse{
+			_ = json.NewEncoder(w).Encode(state.SyncResponse{
 				ServerTime: "2026-02-26T12:02:00Z",
 				HostPolicy: state.HostPolicy{PollSeconds: 60, BreakGlass: state.BreakGlass{Active: false}},
 				DesiredState: []state.DesiredState{{
@@ -259,9 +259,13 @@ func TestE2E_SyncAndApply(t *testing.T) {
 	// Set up temp authorized_keys with an existing unmanaged key
 	dir := t.TempDir()
 	sshDir := filepath.Join(dir, ".ssh")
-	os.MkdirAll(sshDir, 0o700)
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
 	akPath := filepath.Join(sshDir, "authorized_keys")
-	os.WriteFile(akPath, []byte("ssh-rsa AAAAB3existing... personal@laptop\n"), 0o600)
+	if err := os.WriteFile(akPath, []byte("ssh-rsa AAAAB3existing... personal@laptop\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 
 	logger := telemetry.NewLogger(slog.LevelDebug)
 	client := NewClient(server.URL, "host-e2e", credential, logger)
@@ -326,7 +330,9 @@ func TestE2E_SyncAndApply(t *testing.T) {
 	for _, ds := range resp2.DesiredState {
 		for _, u := range cfg.Users {
 			if u.OSUser == ds.OSUser {
-				authorizedkeys.Apply(u.ResolveAuthorizedKeysPath(), ds.AuthorizedKeys)
+				if err := authorizedkeys.Apply(u.ResolveAuthorizedKeysPath(), ds.AuthorizedKeys); err != nil {
+					t.Fatalf("apply 2 failed: %v", err)
+				}
 			}
 		}
 	}
@@ -357,7 +363,9 @@ func TestE2E_SyncAndApply(t *testing.T) {
 	for _, ds := range resp3.DesiredState {
 		for _, u := range cfg.Users {
 			if u.OSUser == ds.OSUser {
-				authorizedkeys.Apply(u.ResolveAuthorizedKeysPath(), ds.AuthorizedKeys)
+				if err := authorizedkeys.Apply(u.ResolveAuthorizedKeysPath(), ds.AuthorizedKeys); err != nil {
+					t.Fatalf("apply 3 failed: %v", err)
+				}
 			}
 		}
 	}
@@ -376,7 +384,7 @@ func TestHealthCheck_Success(t *testing.T) {
 	credential := "health-check-credential"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(state.SyncResponse{
+		_ = json.NewEncoder(w).Encode(state.SyncResponse{
 			ServerTime: "2026-02-27T12:00:00Z",
 			HostPolicy: state.HostPolicy{
 				PollSeconds: 60,

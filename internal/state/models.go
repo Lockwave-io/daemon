@@ -30,7 +30,6 @@ type SyncResponse struct {
 	HostPolicy         HostPolicy      `json:"host_policy"`
 	DesiredState       []DesiredState  `json:"desired_state"`
 	CredentialRotation *string         `json:"credential_rotation"`
-	Update             *UpdateHint     `json:"update,omitempty"`
 	Config             *SyncConfig     `json:"config,omitempty"`
 }
 
@@ -38,7 +37,6 @@ type SyncResponse struct {
 type SyncConfig struct {
 	ManagedUsers []ConfigUser `json:"managed_users"`
 	PollSeconds  int          `json:"poll_seconds"`
-	AutoUpdate   bool         `json:"auto_update"`
 }
 
 // ConfigUser describes an OS user the daemon should manage.
@@ -46,13 +44,6 @@ type ConfigUser struct {
 	OSUser             string `json:"os_user"`
 	AuthorizedKeysPath string `json:"authorized_keys_path,omitempty"`
 	ExclusiveKeys      bool   `json:"exclusive_keys"`
-}
-
-// UpdateHint tells the daemon a newer version is available and where to download it.
-type UpdateHint struct {
-	Version  string `json:"version"`
-	URL      string `json:"url"`
-	Checksum string `json:"checksum"` // SHA-256 hex digest of the binary (mandatory)
 }
 
 // HostPolicy contains policy directives from the server.

@@ -1,6 +1,6 @@
-# Build lockwaved daemon, generate checksums + changelog, upload to releases storage (S3/Hetzner).
-# Trigger: push tag v* (e.g. v1.2.3). After run, set LOCKWAVE_DAEMON_CURRENT_VERSION in Laravel env.
-# Prunes GitHub releases and S3 bucket version dirs to the latest 3 (see prune job env RELEASES_TO_KEEP).
+# Build lockwaved daemon, generate checksums, create GitHub Release.
+# Trigger: push tag v* (e.g. v1.2.3).
+# Prunes GitHub releases to the latest 3 (see prune job env RELEASES_TO_KEEP).
 
 name: Release Daemon
 
@@ -39,10 +39,11 @@ jobs:
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           LDFLAGS="-s -w -X main.version=${VERSION}"
-          go build -ldflags "$LDFLAGS" -o artifacts/lockwaved-linux-amd64 ./cmd/lockwaved
-          GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o artifacts/lockwaved-linux-arm64 ./cmd/lockwaved
-          GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o artifacts/lockwaved-darwin-amd64 ./cmd/lockwaved
-          GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o artifacts/lockwaved-darwin-arm64 ./cmd/lockwaved
+          CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o artifacts/lockwaved-linux-amd64 ./cmd/lockwaved
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o artifacts/lockwaved-linux-arm64 ./cmd/lockwaved
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o artifacts/lockwaved-darwin-amd64 ./cmd/lockwaved
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o artifacts/lockwaved-darwin-arm64 ./cmd/lockwaved
+          CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 go build -ldflags "$LDFLAGS" -o artifacts/lockwaved-freebsd-amd64 ./cmd/lockwaved
 
       - name: Verify binary version
         env:
@@ -55,7 +56,6 @@ jobs:
             exit 1
           fi
           echo "Binary version verified: ${ACTUAL}"
-          echo "${VERSION}" > artifacts/VERSION
 
       - name: Generate SHA-256 checksums
         working-directory: artifacts
@@ -63,108 +63,11 @@ jobs:
           sha256sum lockwaved-* > checksums.txt
           cat checksums.txt
 
-      - name: Generate changelog
-        id: changelog
-        run: |
-          PREV_TAG=$(git tag --sort=-version:refname | head -n 2 | tail -n 1)
-          if [ -z "$PREV_TAG" ]; then
-            echo "CHANGELOG=Initial release" >> "$GITHUB_OUTPUT"
-          else
-            {
-              echo "CHANGELOG<<EOF"
-              git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD" 2>/dev/null || echo "- Bug fixes and improvements"
-              echo ""
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Generate SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          path: .
-          output-file: artifacts/sbom.spdx.json
-          format: spdx-json
-          upload-artifact: false
-          upload-release-assets: false
-        continue-on-error: true
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: lockwaved-binaries
           path: artifacts/
-
-  upload:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          sparse-checkout: packaging
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: lockwaved-binaries
-
-      - name: Configure AWS CLI for Hetzner S3
-        env:
-          HETZNER_S3_ACCESS_KEY_ID: ${{ secrets.HETZNER_S3_ACCESS_KEY_ID }}
-          HETZNER_S3_SECRET_ACCESS_KEY: ${{ secrets.HETZNER_S3_SECRET_ACCESS_KEY }}
-        run: |
-          mkdir -p ~/.aws
-          echo "[default]" > ~/.aws/config
-          echo "region = eu-central-1" >> ~/.aws/config
-          echo "[default]" > ~/.aws/credentials
-          echo "aws_access_key_id = $HETZNER_S3_ACCESS_KEY_ID" >> ~/.aws/credentials
-          echo "aws_secret_access_key = $HETZNER_S3_SECRET_ACCESS_KEY" >> ~/.aws/credentials
-
-      - name: Upload to S3
-        env:
-          HETZNER_S3_ENDPOINT: ${{ secrets.HETZNER_S3_ENDPOINT }}
-          HETZNER_S3_BUCKET: ${{ secrets.HETZNER_S3_BUCKET }}
-          VERSION: ${{ needs.build.outputs.version }}
-        run: |
-          # Normalize endpoint: ensure https:// scheme is present
-          ENDPOINT="${HETZNER_S3_ENDPOINT#http://}"
-          ENDPOINT="${ENDPOINT#https://}"
-          ENDPOINT="https://${ENDPOINT}"
-
-          for f in lockwaved-* checksums.txt; do
-            [ -f "$f" ] || continue
-            # Upload to versioned path
-            aws s3 cp "$f" "s3://$HETZNER_S3_BUCKET/releases/lockwaved/$VERSION/$f" \
-              --endpoint-url "$ENDPOINT" --region eu-central-1
-            # Upload to latest/ so the install script always gets the newest release
-            aws s3 cp "$f" "s3://$HETZNER_S3_BUCKET/releases/lockwaved/latest/$f" \
-              --endpoint-url "$ENDPOINT" --region eu-central-1
-          done
-
-          # Upload install script to S3 root
-          if [ -f packaging/install.sh ]; then
-            aws s3 cp packaging/install.sh "s3://$HETZNER_S3_BUCKET/install.sh" \
-              --endpoint-url "$ENDPOINT" --region eu-central-1 \
-              --content-type "text/plain"
-          fi
-
-      - name: Verify S3 upload
-        env:
-          HETZNER_S3_ENDPOINT: ${{ secrets.HETZNER_S3_ENDPOINT }}
-          HETZNER_S3_BUCKET: ${{ secrets.HETZNER_S3_BUCKET }}
-          VERSION: ${{ needs.build.outputs.version }}
-        run: |
-          ENDPOINT="${HETZNER_S3_ENDPOINT#http://}"
-          ENDPOINT="${ENDPOINT#https://}"
-          ENDPOINT="https://${ENDPOINT}"
-
-          echo "==> Bucket: $HETZNER_S3_BUCKET"
-          echo "==> Listing releases/lockwaved/$VERSION/:"
-          aws s3 ls "s3://$HETZNER_S3_BUCKET/releases/lockwaved/$VERSION/" \
-            --endpoint-url "$ENDPOINT" --region eu-central-1
-          echo ""
-          echo "==> Listing releases/lockwaved/latest/:"
-          aws s3 ls "s3://$HETZNER_S3_BUCKET/releases/lockwaved/latest/" \
-            --endpoint-url "$ENDPOINT" --region eu-central-1
 
   release:
     needs: build
@@ -184,25 +87,24 @@ jobs:
       - name: Delete existing release (if any)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release delete "${{ github.ref_name }}" --repo "${{ github.repository }}" --yes 2>/dev/null || true
+        run: gh release delete "${{ github.ref_name }}" --repo "${{ github.repository }}" --yes --cleanup-tag=false 2>/dev/null || true
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: lockwaved ${{ github.ref_name }}
-          generate_release_notes: true
-          make_latest: true
-          files: |
-            lockwaved-*
-            checksums.txt
-            sbom.spdx.json
-            packaging/install.sh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            lockwaved-* \
+            checksums.txt \
+            packaging/install.sh \
+            --repo "${{ github.repository }}" \
+            --title "lockwaved v${VERSION}" \
+            --generate-notes \
+            --latest
 
   prune:
-    needs: [upload, release]
+    needs: release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -215,7 +117,7 @@ jobs:
         run: |
           set -e
           # List release tags (semver only), sort ascending (oldest first)
-          tags=$(gh release list --limit 100 --json tagName -q '.[].tagName' \
+          tags=$(gh release list --repo "${{ github.repository }}" --limit 100 --json tagName -q '.[].tagName' \
             | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
           if [ -z "$tags" ]; then
             echo "No semver release tags found."
@@ -232,49 +134,3 @@ jobs:
             echo "Deleting GitHub release: $tag"
             gh release delete "$tag" --repo "${{ github.repository }}" --yes
           done
-
-      - name: Configure AWS CLI for Hetzner S3
-        env:
-          HETZNER_S3_ACCESS_KEY_ID: ${{ secrets.HETZNER_S3_ACCESS_KEY_ID }}
-          HETZNER_S3_SECRET_ACCESS_KEY: ${{ secrets.HETZNER_S3_SECRET_ACCESS_KEY }}
-        run: |
-          mkdir -p ~/.aws
-          echo "[default]" > ~/.aws/config
-          echo "region = eu-central-1" >> ~/.aws/config
-          echo "[default]" > ~/.aws/credentials
-          echo "aws_access_key_id = $HETZNER_S3_ACCESS_KEY_ID" >> ~/.aws/credentials
-          echo "aws_secret_access_key = $HETZNER_S3_SECRET_ACCESS_KEY" >> ~/.aws/credentials
-
-      - name: Prune old S3 version dirs
-        env:
-          HETZNER_S3_ENDPOINT: ${{ secrets.HETZNER_S3_ENDPOINT }}
-          HETZNER_S3_BUCKET: ${{ secrets.HETZNER_S3_BUCKET }}
-        run: |
-          set -e
-          echo "==> Removing old releases from S3 bucket (keeping latest $RELEASES_TO_KEEP version dirs)"
-          ENDPOINT="${HETZNER_S3_ENDPOINT#http://}"
-          ENDPOINT="${ENDPOINT#https://}"
-          ENDPOINT="https://${ENDPOINT}"
-
-          # List version dirs (exclude latest), semver only, sort ascending
-          versions=$(aws s3 ls "s3://$HETZNER_S3_BUCKET/releases/lockwaved/" \
-            --endpoint-url "$ENDPOINT" --region eu-central-1 \
-            | awk '$3=="PRE"{gsub(/\/$/,"",$4); print $4}' \
-            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
-            | sort -V || true)
-          if [ -z "$versions" ]; then
-            echo "No version dirs found in S3."
-            exit 0
-          fi
-          count=$(echo "$versions" | wc -l)
-          if [ "$count" -le "$RELEASES_TO_KEEP" ]; then
-            echo "Only $count version dir(s) in bucket; keeping all."
-            exit 0
-          fi
-          to_delete=$((count - RELEASES_TO_KEEP))
-          echo "$versions" | head -n "$to_delete" | while read -r ver; do
-            echo "Deleting from bucket: releases/lockwaved/$ver/"
-            aws s3 rm "s3://$HETZNER_S3_BUCKET/releases/lockwaved/$ver/" \
-              --recursive --endpoint-url "$ENDPOINT" --region eu-central-1
-          done
-          echo "==> Bucket pruned to latest $RELEASES_TO_KEEP releases."

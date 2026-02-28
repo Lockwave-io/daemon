@@ -4,23 +4,25 @@ set -euo pipefail
 # Lockwave Daemon Installer
 # Usage:
 #   Fresh install (register + start):
-#     curl -fsSL https://lockwave.io/install.sh | sudo bash -s -- \
+#     curl -fsSL https://get.lockwave.io/install.sh | sudo bash -s -- \
 #       --token <enrollment_token> \
-#       --api-url <api_url> \
 #       --os-user deploy[,user2,...] \
+#       [--api-url https://lockwave.io] \
 #       [--authorized-keys-path /path1[,/path2,...]] \
 #       [--poll-seconds 60]
 #
 #   Upgrade existing installation:
-#     curl -fsSL https://lockwave.io/install.sh | sudo bash -s -- --upgrade
+#     curl -fsSL https://get.lockwave.io/install.sh | sudo bash -s -- --upgrade
 #
 #   Uninstall:
-#     curl -fsSL https://lockwave.io/install.sh | sudo bash -s -- --uninstall
+#     curl -fsSL https://get.lockwave.io/install.sh | sudo bash -s -- --uninstall
 
-BINARY_URL="${LOCKWAVE_BINARY_URL:-https://releases.lockwave.io/lockwaved/latest}"
+GITHUB_REPO="lockwave-io/lockwaved"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/lockwave"
 SERVICE_NAME="lockwaved"
+SSHD_DROPIN_DIR="/etc/ssh/sshd_config.d"
+SSHD_DROPIN_FILE="99-lockwave.conf"
 
 # Parse arguments
 TOKEN=""
@@ -99,11 +101,12 @@ start_service() {
     fi
 }
 
-# Download and install the binary
+# Download and install the binary from GitHub Releases
 install_binary() {
     detect_platform
-    echo "==> Downloading lockwaved (${OS}/${ARCH})..."
-    DOWNLOAD_URL="${BINARY_URL}/lockwaved-${OS}-${ARCH}"
+    BINARY_NAME="lockwaved-${OS}-${ARCH}"
+    echo "==> Downloading ${BINARY_NAME} from GitHub Releases..."
+    DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/${BINARY_NAME}"
     curl -fsSL "$DOWNLOAD_URL" -o "${INSTALL_DIR}/${SERVICE_NAME}"
     chmod +x "${INSTALL_DIR}/${SERVICE_NAME}"
     echo "==> Binary installed to ${INSTALL_DIR}/${SERVICE_NAME}"
@@ -116,7 +119,7 @@ install_systemd_unit() {
         cat > "/etc/systemd/system/${SERVICE_NAME}.service" << 'UNIT'
 [Unit]
 Description=Lockwave SSH Key Management Daemon
-Documentation=https://lockwave.io/docs/daemon
+Documentation=https://lockwave.io/docs
 After=network-online.target
 Wants=network-online.target
 
@@ -129,7 +132,7 @@ RestartSec=10
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=no
-ReadWritePaths=/home /etc/lockwave
+ReadWritePaths=/home /etc/lockwave /etc/ssh/sshd_config.d
 PrivateTmp=yes
 ProtectKernelModules=yes
 ProtectKernelTunables=yes
@@ -160,9 +163,9 @@ if [[ "$UNINSTALL" == "true" ]]; then
     echo "==> Removed binary"
 
     # Remove sshd drop-in config
-    if [[ -f "/etc/ssh/sshd_config.d/99-lockwave.conf" ]]; then
-        rm -f "/etc/ssh/sshd_config.d/99-lockwave.conf"
-        echo "==> Removed sshd drop-in config"
+    if [[ -f "${SSHD_DROPIN_DIR}/${SSHD_DROPIN_FILE}" ]]; then
+        rm -f "${SSHD_DROPIN_DIR}/${SSHD_DROPIN_FILE}"
+        echo "==> Removed sshd drop-in config (${SSHD_DROPIN_FILE})"
         if command -v systemctl &>/dev/null; then
             systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || true
             echo "==> Reloaded sshd"

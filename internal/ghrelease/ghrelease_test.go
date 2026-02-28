@@ -7,23 +7,14 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/sirupsen/logrus"
 )
-
-func testLogger() *logrus.Logger {
-	l := logrus.New()
-	l.SetLevel(logrus.DebugLevel)
-	l.SetOutput(&strings.Builder{})
-	return l
-}
 
 func TestFetchChecksum(t *testing.T) {
 	binaryName := fmt.Sprintf("lockwaved-%s-%s", runtime.GOOS, runtime.GOARCH)
 	checksumContent := fmt.Sprintf("abc123def456  lockwaved-linux-amd64\n789xyz000111  %s\n", binaryName)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, checksumContent)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, checksumContent)
 	}))
 	defer srv.Close()
 
@@ -38,8 +29,8 @@ func TestFetchChecksum(t *testing.T) {
 }
 
 func TestFetchChecksum_NotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "abc123  lockwaved-linux-amd64\n")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, "abc123  lockwaved-linux-amd64\n")
 	}))
 	defer srv.Close()
 
@@ -58,8 +49,8 @@ func TestFetchChecksum_FullContent(t *testing.T) {
 	expectedChecksum := "deadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678"
 	checksumContent := fmt.Sprintf("%s  %s\nabc123def456  lockwaved-other-arch\n", expectedChecksum, binaryName)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, checksumContent)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, checksumContent)
 	}))
 	defer srv.Close()
 
@@ -73,15 +64,12 @@ func TestFetchChecksum_FullContent(t *testing.T) {
 	}
 }
 
-func TestCheck_NoReleases(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestFetchChecksum_404(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
 
-	// We can't directly test Check() with a custom URL without refactoring,
-	// but we verify the 404 handling logic is correct by checking that
-	// our fetchChecksum handles non-200 properly.
 	client := &http.Client{}
 	_, err := fetchChecksum(client, srv.URL+"/checksums.txt", "lockwaved-linux-amd64")
 	if err == nil {
@@ -90,7 +78,7 @@ func TestCheck_NoReleases(t *testing.T) {
 }
 
 func TestFetchChecksum_ServerError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()

@@ -19,6 +19,7 @@ import (
 	"github.com/lockwave-io/daemon/internal/authorizedkeys"
 	"github.com/lockwave-io/daemon/internal/config"
 	"github.com/lockwave-io/daemon/internal/drift"
+	"github.com/lockwave-io/daemon/internal/ghrelease"
 	"github.com/lockwave-io/daemon/internal/sshdconfig"
 	"github.com/lockwave-io/daemon/internal/state"
 	"github.com/lockwave-io/daemon/internal/telemetry"
@@ -204,16 +205,9 @@ func checkCommand() *cli.Command {
 func updateCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "update",
-		Usage: "Check for a new daemon version and install it if available",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:  "config",
-				Usage: "Config file path",
-				Value: config.DefaultConfigPath,
-			},
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return runUpdate(cmd.String("config"))
+		Usage: "Check GitHub releases for a new daemon version and install it",
+		Action: func(_ context.Context, _ *cli.Command) error {
+			return runUpdate()
 		},
 	}
 }
@@ -406,6 +400,45 @@ func runDaemon(configPath string, debug bool, logFile string) error {
 	ticker := time.NewTicker(time.Duration(currentPollSecs) * time.Second)
 	defer ticker.Stop()
 
+	// Independent 10-minute update check timer (GitHub Releases)
+	const updateCheckInterval = 10 * time.Minute
+	updateTicker := time.NewTicker(updateCheckInterval)
+	defer updateTicker.Stop()
+
+	// Check for updates via GitHub Releases
+	checkGitHubUpdate := func() {
+		if version == "dev" {
+			return
+		}
+		logger.Debug("checking GitHub releases for updates")
+		rel, err := ghrelease.Check("", logger)
+		if err != nil {
+			logger.WithError(err).Warn("GitHub release check failed")
+			return
+		}
+		if rel == nil {
+			logger.Debug("no suitable release found on GitHub")
+			return
+		}
+		if rel.Version == version {
+			logger.WithField("version", version).Debug("already on latest version")
+			return
+		}
+		logger.WithFields(logrus.Fields{
+			"current": version,
+			"target":  rel.Version,
+		}).Info("update available from GitHub")
+		if err := update.Apply(rel.URL, rel.Checksum, logger); err != nil {
+			logger.WithError(err).Warn("update failed, continuing")
+			return
+		}
+		logger.Info("update applied, restarting service")
+		if !restartService(logger) {
+			logger.Info("systemctl restart unavailable, exiting for process manager restart")
+		}
+		os.Exit(0)
+	}
+
 	// Run sync immediately on start, then on ticker
 	for {
 		syncCtx, syncCancel := context.WithTimeout(ctx, 30*time.Second)
@@ -461,26 +494,6 @@ func runDaemon(configPath string, debug bool, logFile string) error {
 			if !inFastSync() && !fastSyncUntil.IsZero() {
 				fastSyncUntil = time.Time{}
 			}
-
-			// Check auto_update flag from config section (defaults to true if no config)
-			autoUpdate := resp == nil || resp.Config == nil || resp.Config.AutoUpdate
-			if autoUpdate && resp != nil && resp.Update != nil && resp.Update.Version != version && version != "dev" {
-				logger.WithFields(logrus.Fields{
-					"current": version,
-					"target":  resp.Update.Version,
-				}).Info("update available")
-				if err := update.Apply(resp.Update.URL, resp.Update.Checksum, logger); err != nil {
-					logger.WithError(err).Warn("update failed, continuing")
-				} else {
-					logger.Info("update applied, restarting service")
-					if !restartService(logger) {
-						logger.Info("systemctl restart unavailable, exiting for process manager restart")
-					}
-					os.Exit(0)
-				}
-			} else if !autoUpdate && resp != nil && resp.Update != nil {
-				logger.WithField("target", resp.Update.Version).Debug("update available but auto-update disabled")
-			}
 		}
 
 		select {
@@ -488,7 +501,10 @@ func runDaemon(configPath string, debug bool, logFile string) error {
 			logger.Info("daemon stopped")
 			return nil
 		case <-ticker.C:
-			// Continue loop
+			// Continue sync loop
+		case <-updateTicker.C:
+			// Independent update check via GitHub Releases
+			checkGitHubUpdate()
 		}
 	}
 }
@@ -940,63 +956,31 @@ func restartService(logger *logrus.Logger) bool {
 	return true
 }
 
-// runUpdate checks the control plane for a newer daemon version and installs it.
-func runUpdate(configPath string) error {
+// runUpdate checks GitHub Releases for a newer daemon version and installs it.
+func runUpdate() error {
 	logger := telemetry.NewLogger(false)
 
 	if version == "dev" {
 		return fmt.Errorf("cannot update a dev build — install a release build first")
 	}
 
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-
-	client := api.NewClient(cfg.APIURL, cfg.HostID, cfg.Credential, logger)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Perform a minimal sync to get the update hint
-	observed := make([]state.Observed, 0, len(cfg.Users))
-	for _, u := range cfg.Users {
-		observed = append(observed, state.Observed{
-			OSUser:                  u.OSUser,
-			ManagedBlockPresent:     false,
-			ManagedKeysFingerprints: []string{},
-		})
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	syncReq := &state.SyncRequest{
-		HostID:        cfg.HostID,
-		DaemonVersion: version,
-		Status: state.HostStatus{
-			LastApplyResult: "pending",
-			DriftDetected:   false,
-			AppliedAt:       &now,
-		},
-		Observed: observed,
-	}
-
 	fmt.Printf("Current version: %s\n", version)
-	fmt.Printf("Checking for updates...\n")
+	fmt.Printf("Checking GitHub releases for updates...\n")
 
-	resp, err := client.Sync(ctx, syncReq)
+	rel, err := ghrelease.Check("", logger)
 	if err != nil {
 		return fmt.Errorf("failed to check for updates: %w", err)
 	}
 
-	if resp.Update == nil || resp.Update.Version == version {
+	if rel == nil || rel.Version == version {
 		fmt.Printf("Already up to date.\n")
 		return nil
 	}
 
-	fmt.Printf("Update available: %s → %s\n", version, resp.Update.Version)
+	fmt.Printf("Update available: %s → %s\n", version, rel.Version)
 	fmt.Printf("Downloading and installing...\n")
 
-	if err := update.Apply(resp.Update.URL, resp.Update.Checksum, logger); err != nil {
+	if err := update.Apply(rel.URL, rel.Checksum, logger); err != nil {
 		return fmt.Errorf("update failed: %w", err)
 	}
 

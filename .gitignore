@@ -1,6 +1,9 @@
 # Build output (Makefile: build/)
 build/
 
+# Release artifacts
+dist/
+
 # Binaries (root-level only, not cmd/lockwaved/)
 /lockwaved
 lockwaved-*

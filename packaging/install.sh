@@ -159,17 +159,21 @@ if [[ "$UNINSTALL" == "true" ]]; then
     rm -f "${INSTALL_DIR}/${SERVICE_NAME}"
     echo "==> Removed binary"
 
-    if [[ -d "$CONFIG_DIR" ]]; then
-        read -rp "Remove config directory ${CONFIG_DIR}? [y/N] " confirm
-        if [[ "$confirm" =~ ^[Yy]$ ]]; then
-            rm -rf "$CONFIG_DIR"
-            echo "==> Removed config directory"
-        else
-            echo "==> Config directory preserved"
+    # Remove sshd drop-in config
+    if [[ -f "/etc/ssh/sshd_config.d/99-lockwave.conf" ]]; then
+        rm -f "/etc/ssh/sshd_config.d/99-lockwave.conf"
+        echo "==> Removed sshd drop-in config"
+        if command -v systemctl &>/dev/null; then
+            systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || true
+            echo "==> Reloaded sshd"
         fi
     fi
 
-    echo "==> Uninstall complete!"
+    # Remove config directory (contains credentials)
+    rm -rf "$CONFIG_DIR"
+    echo "==> Removed config directory (${CONFIG_DIR})"
+
+    echo "==> Uninstall complete! All Lockwave files have been removed."
     exit 0
 fi
 

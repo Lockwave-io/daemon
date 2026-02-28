@@ -130,6 +130,10 @@ managed_users:
 
 - **`lockwaved register`** — One-time enrollment. Requires `--token` and `--os-user`; optional `--api-url` (default **https://lockwave.io**), `--config`, `--poll-seconds`. Writes config and exits.
 - **`lockwaved run`** — Run the daemon (sync loop). Options: `--config` (default `/etc/lockwave/config.yaml`), `--debug` (enable debug logs).
+- **`lockwaved check`** — Perform a single sync to verify connectivity and display host policy (poll interval, password auth status, break-glass, etc.).
+- **`lockwaved status`** — Show current config and authorized_keys state for each managed user.
+- **`lockwaved configure`** — Modify config without re-registering (add/remove users, change poll interval, change API URL).
+- **`lockwaved update`** — Manually check for and install daemon updates.
 - **`lockwaved version`** — Print version and OS/arch.
 
 ---
@@ -170,7 +174,7 @@ ssh-rsa AAAA... key2     # lockwave:<key_id>
 When the Lockwave control plane enables **block password authentication** for a host, the daemon can write an sshd drop-in configuration so that only key-based authentication is allowed.
 
 - **Location:** `/etc/ssh/sshd_config.d/99-lockwave.conf` (or the drop-in directory used on your system, e.g. `/etc/ssh/sshd_config.d` on Linux).
-- **Content:** The daemon sets `PasswordAuthentication no` and `KbdInteractiveAuthentication no` in this file. The file is prefixed with a comment that it is managed by Lockwave and will be overwritten on the next sync.
+- **Content:** The daemon sets `PasswordAuthentication no` (or `yes` when unblocked) in this file. The file is prefixed with a comment that it is managed by Lockwave and will be overwritten on the next sync.
 - **Validation:** Before applying, the daemon runs `sshd -t`. If validation fails, the drop-in is removed and the daemon reports an error (no broken sshd config is left in place).
 - **Reload:** After writing, the daemon reloads sshd (e.g. `systemctl reload sshd` or equivalent). If reload fails, the error is reported.
 - **Status:** The daemon reports `password_auth_blocked` in the sync request status so the control plane can show whether the setting is in effect.

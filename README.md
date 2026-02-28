@@ -11,7 +11,8 @@
 
 - **Register** once with an enrollment token (from the Lockwave UI); receives a host ID and HMAC credential.
 - **Sync** on a configurable interval: reports current state, receives desired SSH public keys per OS user, and writes them into a **managed block** inside each user’s `authorized_keys` file.
-- **Preserve** any keys outside the managed block; only the section between the Lockwave markers is updated.
+- **Preserve** any keys outside the managed block (by default); only the section between the Lockwave markers is updated. When the server sends **exclusive keys** mode for a user, the daemon replaces the entire `authorized_keys` file with only Lockwave-managed keys.
+- **SSH server hardening** (optional): when the control plane enables **block password authentication** for the host, the daemon writes an sshd drop-in config to disable password and keyboard-interactive authentication; see [SSH server hardening](#ssh-server-hardening) below.
 - **Self-update** when the control plane advertises a newer version (optional; can be disabled by not setting the version on the server).
 - **Credential rotation**: picks up rotated credentials from the sync response and persists them to the config file.
 
@@ -121,7 +122,7 @@ managed_users:
 - **host_id**: Set by the server during `lockwaved register`.
 - **credential**: HMAC secret from registration; used to sign sync requests. Keep confidential.
 - **poll_seconds**: Seconds between syncs (server may enforce a minimum).
-- **managed_users**: List of OS users. Optional `authorized_keys_path` overrides the default `~/.ssh/authorized_keys` (i.e. `/home/<os_user>/.ssh/authorized_keys`).
+- **managed_users**: List of OS users. Optional `authorized_keys_path` overrides the default `~/.ssh/authorized_keys` (i.e. `/home/<os_user>/.ssh/authorized_keys`). The server can push **exclusive_keys** per user via the sync response (`config.managed_users`); when true, the daemon replaces the entire `authorized_keys` file with only Lockwave keys instead of preserving keys outside the block.
 
 ---
 
@@ -138,9 +139,11 @@ managed_users:
 1. Daemon reads each managed user’s `authorized_keys` and finds the **Lockwave managed block** (see below).
 2. It POSTs to the Lockwave sync API with:
    - Host ID and HMAC-signed headers (signature, timestamp, nonce).
-   - Current status and the list of keys (or fingerprints) in the managed block.
-3. Server responds with **desired state**: which SSH public keys should be present for each OS user.
-4. Daemon rewrites only the **managed block** in each `authorized_keys` file, leaving keys above and below untouched. Writes are atomic (temp file + rename).
+   - Current status (including **password_auth_blocked** when SSH hardening is applied) and the list of keys (or fingerprints) in the managed block.
+3. Server responds with **desired state**: which SSH public keys should be present for each OS user. Each entry may include **exclusive_keys** (replace entire file vs. only the block). The response may also include:
+   - **config**: managed users (with optional **exclusive_keys**), **poll_seconds**, **auto_update**; the daemon may persist these.
+   - **update**: when present, a newer daemon version is available (version, URL, checksum); see [Self-update](#self-update).
+4. Daemon rewrites the managed block (or the entire file when **exclusive_keys** is true) in each `authorized_keys` file. Writes are atomic (temp file + rename).
 
 Sync runs immediately on start, then every `poll_seconds`. If the server sends **credential rotation**, the daemon updates the config file. If the server sends an **update hint** (newer version URL), the daemon can download and replace its own binary, then exit so systemd restarts the new build (see [Self-update](#self-update)).
 
@@ -157,8 +160,28 @@ ssh-rsa AAAA... key2     # lockwave:<key_id>
 # --- END LOCKWAVE MANAGED BLOCK ---
 ```
 
-- Keys **outside** this block are never modified.
+- Keys **outside** this block are never modified (unless **exclusive keys** mode is enabled for that user; then the whole file is replaced by Lockwave keys only).
 - Keys **inside** are fully controlled by Lockwave (assignments, revocations, break-glass). Do not edit the block by hand; changes will be overwritten on the next sync.
+
+---
+
+## SSH server hardening
+
+When the Lockwave control plane enables **block password authentication** for a host, the daemon can write an sshd drop-in configuration so that only key-based authentication is allowed.
+
+- **Location:** `/etc/ssh/sshd_config.d/99-lockwave.conf` (or the drop-in directory used on your system, e.g. `/etc/ssh/sshd_config.d` on Linux).
+- **Content:** The daemon sets `PasswordAuthentication no` and `KbdInteractiveAuthentication no` in this file. The file is prefixed with a comment that it is managed by Lockwave and will be overwritten on the next sync.
+- **Validation:** Before applying, the daemon runs `sshd -t`. If validation fails, the drop-in is removed and the daemon reports an error (no broken sshd config is left in place).
+- **Reload:** After writing, the daemon reloads sshd (e.g. `systemctl reload sshd` or equivalent). If reload fails, the error is reported.
+- **Status:** The daemon reports `password_auth_blocked` in the sync request status so the control plane can show whether the setting is in effect.
+
+This behavior is optional and controlled per host from the Lockwave dashboard. If the control plane does not set `block_password_auth`, the daemon does not write or modify the sshd drop-in.
+
+---
+
+## Exclusive keys mode
+
+By default, the daemon only updates the **managed block** inside `authorized_keys` and leaves any other keys in the file unchanged. When the server sends **exclusive_keys: true** for a managed user (in the sync response’s `desired_state` or in `config.managed_users`), the daemon instead **replaces the entire** `authorized_keys` file with only the Lockwave-managed keys. No keys outside the block are preserved. Use this for strict compliance or when the host user should have only Lockwave-provisioned access. The setting is configured per host or per OS user in the Lockwave dashboard.
 
 ---
 
@@ -232,6 +255,7 @@ Run the daemon locally (with a config pointing at your Lockwave instance or a te
 | `401 Nonce already used` | Replay or duplicate request | Ensure only one daemon instance per host. |
 | Sync returns empty desired state | Break-glass active or no assignments | Check Lockwave dashboard for break-glass and key assignments. |
 | Daemon not updating keys | Permissions on `~/.ssh` or `authorized_keys` | Ensure daemon can read and write the file (e.g. run as root or appropriate user with access). |
+| Password auth still allowed / drop-in not applied | sshd_config.d missing or not used; reload failed | Ensure `/etc/ssh/sshd_config.d` exists and sshd is configured to include it; check daemon logs for reload errors. |
 
 Logs (systemd):
 
@@ -244,7 +268,8 @@ journalctl -u lockwaved -f
 ## Documentation
 
 - [Lockwave](https://lockwave.io) — product and dashboard.
-- [Daemon docs](https://lockwave.io/docs/daemon) — installation and operations (when available).
+- [Lockwave Docs](https://lockwave.io/docs) — installation, daemon behavior, API, and security model.
+- [Daemon docs](https://lockwave.io/docs#daemon) — installation and operations (when available).
 - [Install script](https://lockwave.io/install.sh) — one-line install used in Quick start.
 
 ---

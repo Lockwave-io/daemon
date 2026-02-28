@@ -11,9 +11,10 @@ type SyncRequest struct {
 
 // HostStatus reports the daemon's current state.
 type HostStatus struct {
-	LastApplyResult string  `json:"last_apply_result"` // "success", "failure", "pending"
-	DriftDetected   bool    `json:"drift_detected"`
-	AppliedAt       *string `json:"applied_at,omitempty"`
+	LastApplyResult     string  `json:"last_apply_result"` // "success", "failure", "pending"
+	DriftDetected       bool    `json:"drift_detected"`
+	AppliedAt           *string `json:"applied_at,omitempty"`
+	PasswordAuthBlocked *bool   `json:"password_auth_blocked,omitempty"`
 }
 
 // Observed reports what the daemon sees in a managed authorized_keys file.

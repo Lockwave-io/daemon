@@ -18,6 +18,7 @@ import (
 	"github.com/lockwave-io/daemon/internal/authorizedkeys"
 	"github.com/lockwave-io/daemon/internal/config"
 	"github.com/lockwave-io/daemon/internal/drift"
+	"github.com/lockwave-io/daemon/internal/sshdconfig"
 	"github.com/lockwave-io/daemon/internal/state"
 	"github.com/lockwave-io/daemon/internal/telemetry"
 	"github.com/lockwave-io/daemon/internal/update"
@@ -563,14 +564,22 @@ func doSync(ctx context.Context, client *api.Client, cfg *config.Config, configP
 		logger.WithField("count", len(discoveredKeys)).Info("first sync: discovered existing SSH keys to report")
 	}
 
+	// Read current sshd password auth state for status reporting
+	pwBlocked, pwExists, _ := sshdconfig.Current()
+	var pwBlockedPtr *bool
+	if pwExists {
+		pwBlockedPtr = &pwBlocked
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	syncReq := &state.SyncRequest{
 		HostID:         cfg.HostID,
 		DaemonVersion:  version,
 		Status: state.HostStatus{
-			LastApplyResult: lastResult,
-			DriftDetected:   driftDetected,
-			AppliedAt:       &now,
+			LastApplyResult:     lastResult,
+			DriftDetected:       driftDetected,
+			AppliedAt:           &now,
+			PasswordAuthBlocked: pwBlockedPtr,
 		},
 		Observed:       observed,
 		DiscoveredKeys: discoveredKeys,
@@ -587,6 +596,14 @@ func doSync(ctx context.Context, client *api.Client, cfg *config.Config, configP
 		"enforce_ip_binding":   resp.HostPolicy.EnforceIPBinding,
 		"desired_users":        len(resp.DesiredState),
 	}).Info("sync response received")
+
+	// Enforce sshd password authentication policy
+	if changed, err := sshdconfig.Apply(resp.HostPolicy.BlockPasswordAuth, logger); err != nil {
+		logger.WithError(err).Error("failed to enforce sshd password auth policy")
+	} else if changed {
+		logger.WithField("block_password_auth", resp.HostPolicy.BlockPasswordAuth).
+			Info("sshd password authentication policy applied")
+	}
 
 	// Apply desired state for each managed user
 	for _, ds := range resp.DesiredState {
@@ -894,6 +911,17 @@ func runCheck(configPath string) error {
 	fmt.Printf("  Enforce IP bind:   %v\n", resp.HostPolicy.EnforceIPBinding)
 	fmt.Printf("  Break glass:       %v\n", resp.HostPolicy.BreakGlass.Active)
 	fmt.Printf("  Desired users:     %d\n", len(resp.DesiredState))
+
+	blocked, exists, _ := sshdconfig.Current()
+	if exists {
+		pwStatus := "allowed"
+		if blocked {
+			pwStatus = "blocked"
+		}
+		fmt.Printf("  Password auth:     %s\n", pwStatus)
+	} else {
+		fmt.Printf("  Password auth:     unmanaged\n")
+	}
 	return nil
 }
 

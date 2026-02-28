@@ -170,14 +170,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: packaging
+
       - name: Download artifacts
         uses: actions/download-artifact@v8
         with:
           name: lockwaved-binaries
-
-      - uses: actions/checkout@v6
-        with:
-          sparse-checkout: packaging
 
       - name: Delete existing release (if any)
         env:

@@ -20,6 +20,9 @@ on:
       - 'go.sum'
       - '.github/workflows/ci-daemon.yml'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest

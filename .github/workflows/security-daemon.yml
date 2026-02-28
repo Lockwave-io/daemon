@@ -21,6 +21,9 @@ on:
       - 'go.sum'
       - '.github/workflows/security-daemon.yml'
 
+permissions:
+  contents: read
+
 jobs:
   govulncheck:
     runs-on: ubuntu-latest

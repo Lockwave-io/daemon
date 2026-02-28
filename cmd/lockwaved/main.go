@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -471,7 +472,10 @@ func runDaemon(configPath string, debug bool, logFile string) error {
 				if err := update.Apply(resp.Update.URL, resp.Update.Checksum, logger); err != nil {
 					logger.WithError(err).Warn("update failed, continuing")
 				} else {
-					logger.Info("update applied, exiting for restart")
+					logger.Info("update applied, restarting service")
+					if !restartService(logger) {
+						logger.Info("systemctl restart unavailable, exiting for process manager restart")
+					}
 					os.Exit(0)
 				}
 			} else if !autoUpdate && resp != nil && resp.Update != nil {
@@ -925,6 +929,17 @@ func runCheck(configPath string) error {
 	return nil
 }
 
+// restartService attempts to restart the lockwaved systemd service.
+// Returns true if the restart was initiated successfully.
+func restartService(logger *logrus.Logger) bool {
+	out, err := exec.Command("systemctl", "restart", "lockwaved").CombinedOutput() // #nosec G204 -- hardcoded command
+	if err != nil {
+		logger.WithError(err).WithField("output", string(out)).Debug("systemctl restart failed")
+		return false
+	}
+	return true
+}
+
 // runUpdate checks the control plane for a newer daemon version and installs it.
 func runUpdate(configPath string) error {
 	logger := telemetry.NewLogger(false)
@@ -986,6 +1001,11 @@ func runUpdate(configPath string) error {
 	}
 
 	fmt.Printf("Update installed successfully.\n")
-	fmt.Printf("Restart the daemon to use the new version: systemctl restart lockwaved\n")
+
+	if restartService(logger) {
+		fmt.Printf("Service restarted.\n")
+	} else {
+		fmt.Printf("Could not restart service automatically. Run: systemctl restart lockwaved\n")
+	}
 	return nil
 }

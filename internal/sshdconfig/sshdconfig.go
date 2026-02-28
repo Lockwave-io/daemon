@@ -144,16 +144,22 @@ func (m *Manager) buildContent(blockPasswordAuth bool) string {
 }
 
 func (m *Manager) reloadSSHD(logger *logrus.Logger) error {
-	if out, err := m.RunCommand("systemctl", "reload", "sshd"); err == nil {
-		return nil
-	} else {
-		logger.WithFields(logrus.Fields{
-			"error":  err,
-			"output": strings.TrimSpace(string(out)),
-		}).Debug("systemctl reload failed, trying kill -HUP fallback")
+	// Try "sshd" first (RHEL/CentOS/Fedora/Arch), then "ssh" (Debian/Ubuntu)
+	for _, unit := range []string{"sshd", "ssh"} {
+		if out, err := m.RunCommand("systemctl", "reload", unit); err == nil {
+			logger.WithField("unit", unit).Debug("sshd reloaded via systemctl")
+			return nil
+		} else {
+			logger.WithFields(logrus.Fields{
+				"unit":   unit,
+				"error":  err,
+				"output": strings.TrimSpace(string(out)),
+			}).Debug("systemctl reload failed")
+		}
 	}
 
 	// Fallback: send HUP to sshd via pidof
+	logger.Debug("trying kill -HUP fallback")
 	pidOut, err := m.RunCommand("pidof", "sshd")
 	if err != nil {
 		return fmt.Errorf("pidof sshd failed: %w", err)

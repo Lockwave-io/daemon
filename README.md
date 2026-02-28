@@ -85,19 +85,58 @@ LOCKWAVE_BINARY_URL=https://releases.lockwave.io/lockwaved/latest
 
 ### Uninstall
 
-To remove the daemon, binary, and (optionally) config:
+#### Option A: Uninstall script (recommended)
 
 ```bash
 curl -fsSL https://lockwave.io/uninstall.sh | sudo bash
 ```
 
-To remove the config directory `/etc/lockwave` without prompting (e.g. for automation), pass `--yes`:
+This stops the service, removes the binary, systemd unit, and prompts before deleting config. Pass `--yes` to skip the prompt (useful for automation):
 
 ```bash
 curl -fsSL https://lockwave.io/uninstall.sh | sudo bash -s -- --yes
 ```
 
-You can also uninstall using the install script: `curl -fsSL https://lockwave.io/install.sh | sudo bash -s -- --uninstall`.
+You can also uninstall via the install script: `curl -fsSL https://lockwave.io/install.sh | sudo bash -s -- --uninstall`.
+
+#### Option B: Manual uninstall
+
+1. **Stop and disable the service:**
+
+   ```bash
+   sudo systemctl stop lockwaved
+   sudo systemctl disable lockwaved
+   ```
+
+2. **Remove the systemd unit:**
+
+   ```bash
+   sudo rm /etc/systemd/system/lockwaved.service
+   sudo systemctl daemon-reload
+   ```
+
+3. **Remove the binary:**
+
+   ```bash
+   sudo rm /usr/local/bin/lockwaved
+   ```
+
+4. **Remove the sshd drop-in config** (if SSH hardening was enabled):
+
+   ```bash
+   sudo rm -f /etc/ssh/sshd_config.d/99-lockwave.conf
+   sudo systemctl reload sshd
+   ```
+
+5. **Remove config and state** (contains host credentials):
+
+   ```bash
+   sudo rm -rf /etc/lockwave
+   ```
+
+6. **(Optional) Clean up the host in Lockwave:** Delete the host from the Lockwave dashboard so it no longer appears in your inventory.
+
+After uninstalling, keys previously written by the daemon remain in each user's `authorized_keys` inside the managed block markers. You can remove these blocks manually or leave them (they become static entries that the daemon no longer manages).
 
 ---
 
@@ -115,7 +154,7 @@ poll_seconds: 60
 managed_users:
   - os_user: deploy
   - os_user: www-data
-    authorized_keys_path: /var/www/.ssh/authorized_keys
+    authorized_keys_path: /home/<os_user>/.ssh/authorized_keys`
 ```
 
 - **api_url** (optional): Lockwave API base URL; defaults to **https://lockwave.io** (no trailing slash).

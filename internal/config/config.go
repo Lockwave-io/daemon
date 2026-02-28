@@ -23,6 +23,7 @@ type Config struct {
 type ManagedUser struct {
 	OSUser             string `yaml:"os_user"`
 	AuthorizedKeysPath string `yaml:"authorized_keys_path,omitempty"`
+	ExclusiveKeys      bool   `yaml:"exclusive_keys,omitempty"`
 }
 
 // DefaultConfigPath is the standard location for the daemon config file.

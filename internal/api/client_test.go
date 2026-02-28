@@ -321,7 +321,7 @@ func TestE2E_SyncAndApply(t *testing.T) {
 	for _, ds := range resp1.DesiredState {
 		for _, u := range cfg.Users {
 			if u.OSUser == ds.OSUser {
-				if err := authorizedkeys.Apply(u.ResolveAuthorizedKeysPath(), ds.AuthorizedKeys); err != nil {
+				if err := authorizedkeys.Apply(u.ResolveAuthorizedKeysPath(), ds.AuthorizedKeys, false); err != nil {
 					t.Fatalf("apply 1 failed: %v", err)
 				}
 			}
@@ -360,7 +360,7 @@ func TestE2E_SyncAndApply(t *testing.T) {
 	for _, ds := range resp2.DesiredState {
 		for _, u := range cfg.Users {
 			if u.OSUser == ds.OSUser {
-				if err := authorizedkeys.Apply(u.ResolveAuthorizedKeysPath(), ds.AuthorizedKeys); err != nil {
+				if err := authorizedkeys.Apply(u.ResolveAuthorizedKeysPath(), ds.AuthorizedKeys, false); err != nil {
 					t.Fatalf("apply 2 failed: %v", err)
 				}
 			}
@@ -393,7 +393,7 @@ func TestE2E_SyncAndApply(t *testing.T) {
 	for _, ds := range resp3.DesiredState {
 		for _, u := range cfg.Users {
 			if u.OSUser == ds.OSUser {
-				if err := authorizedkeys.Apply(u.ResolveAuthorizedKeysPath(), ds.AuthorizedKeys); err != nil {
+				if err := authorizedkeys.Apply(u.ResolveAuthorizedKeysPath(), ds.AuthorizedKeys, false); err != nil {
 					t.Fatalf("apply 3 failed: %v", err)
 				}
 			}

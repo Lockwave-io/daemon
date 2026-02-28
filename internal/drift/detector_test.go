@@ -35,7 +35,7 @@ func generateTestPublicKey(t *testing.T, comment string) string {
 
 func writeAuthorizedKeys(t *testing.T, path string, keys []state.AuthorizedKey) {
 	t.Helper()
-	if err := authorizedkeys.Apply(path, keys); err != nil {
+	if err := authorizedkeys.Apply(path, keys, false); err != nil {
 		t.Fatalf("apply keys: %v", err)
 	}
 }

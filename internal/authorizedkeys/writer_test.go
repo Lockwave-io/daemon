@@ -43,7 +43,7 @@ func TestApply_CreatesNewFile(t *testing.T) {
 		{KeyID: "key-1", FingerprintSHA256: "SHA256:abc", PublicKey: rawKey},
 	}
 
-	if err := Apply(path, keys); err != nil {
+	if err := Apply(path, keys, false); err != nil {
 		t.Fatalf("Apply failed: %v", err)
 	}
 
@@ -75,7 +75,7 @@ func TestApply_PreservesUnmanagedKeys(t *testing.T) {
 		{KeyID: "key-1", PublicKey: managedKey},
 	}
 
-	if err := Apply(path, keys); err != nil {
+	if err := Apply(path, keys, false); err != nil {
 		t.Fatalf("Apply failed: %v", err)
 	}
 
@@ -108,7 +108,7 @@ func TestApply_ReplacesExistingManagedBlock(t *testing.T) {
 		{KeyID: "new-1", PublicKey: newKey},
 	}
 
-	if err := Apply(path, keys); err != nil {
+	if err := Apply(path, keys, false); err != nil {
 		t.Fatalf("Apply failed: %v", err)
 	}
 
@@ -135,7 +135,7 @@ func TestApply_ReplacesExistingManagedBlock(t *testing.T) {
 func TestApply_EmptyKeysCreatesEmptyManagedBlock(t *testing.T) {
 	path := writeTempFile(t, "ssh-ed25519 existing\n")
 
-	if err := Apply(path, nil); err != nil {
+	if err := Apply(path, nil, false); err != nil {
 		t.Fatalf("Apply failed: %v", err)
 	}
 
@@ -158,7 +158,7 @@ func TestApply_FilePermissions(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "authorized_keys")
 
-	if err := Apply(path, nil); err != nil {
+	if err := Apply(path, nil, false); err != nil {
 		t.Fatalf("Apply failed: %v", err)
 	}
 
@@ -272,7 +272,7 @@ func TestApply_RejectsInjectedOptionsInKey(t *testing.T) {
 	// Either it returns an error (strict) or it strips the options.
 	// Our implementation strips options via re-serialization, so we verify
 	// the file content never contains the injected directive.
-	if err := Apply(path, keys); err != nil {
+	if err := Apply(path, keys, false); err != nil {
 		// If the implementation chooses to reject, that is also acceptable.
 		return
 	}
@@ -283,5 +283,73 @@ func TestApply_RejectsInjectedOptionsInKey(t *testing.T) {
 	}
 	if strings.Contains(string(content), "command=") {
 		t.Error("injected command= option must not appear in the written authorized_keys file")
+	}
+}
+
+func TestApply_ExclusiveMode_DropsUnmanagedKeys(t *testing.T) {
+	// Write a file with pre-block and post-block unmanaged keys.
+	personalKeyPre := generateTestPublicKey(t, "personal-pre")
+	personalKeyPost := generateTestPublicKey(t, "personal-post")
+	existing := personalKeyPre + "\n" +
+		"# --- BEGIN LOCKWAVE MANAGED BLOCK ---\n" +
+		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIoldkey old-managed\n" +
+		"# --- END LOCKWAVE MANAGED BLOCK ---\n" +
+		personalKeyPost + "\n"
+	path := writeTempFile(t, existing)
+
+	managedKey := generateTestPublicKey(t, "managed-new")
+	keys := []state.AuthorizedKey{
+		{KeyID: "key-1", PublicKey: managedKey},
+	}
+
+	if err := Apply(path, keys, true); err != nil {
+		t.Fatalf("Apply exclusive failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(path)
+	s := string(content)
+
+	// Managed key should be present.
+	if !strings.Contains(s, "# lockwave:key-1") {
+		t.Error("managed key was not written")
+	}
+	// Unmanaged keys should be removed.
+	if strings.Contains(s, "personal-pre") {
+		t.Error("pre-block unmanaged key should have been removed in exclusive mode")
+	}
+	if strings.Contains(s, "personal-post") {
+		t.Error("post-block unmanaged key should have been removed in exclusive mode")
+	}
+	// Begin/end markers should still be present.
+	if !strings.Contains(s, DefaultBeginMarker) {
+		t.Error("missing begin marker")
+	}
+	if !strings.Contains(s, DefaultEndMarker) {
+		t.Error("missing end marker")
+	}
+}
+
+func TestApply_ExclusiveMode_EmptyKeys(t *testing.T) {
+	personalKey := generateTestPublicKey(t, "personal")
+	existing := personalKey + "\n"
+	path := writeTempFile(t, existing)
+
+	if err := Apply(path, nil, true); err != nil {
+		t.Fatalf("Apply exclusive empty failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(path)
+	s := string(content)
+
+	// File should contain only empty managed block.
+	if !strings.Contains(s, DefaultBeginMarker) {
+		t.Error("missing begin marker")
+	}
+	if !strings.Contains(s, DefaultEndMarker) {
+		t.Error("missing end marker")
+	}
+	// Unmanaged key should be removed.
+	if strings.Contains(s, "personal") {
+		t.Error("unmanaged key should have been removed in exclusive mode with empty keys")
 	}
 }

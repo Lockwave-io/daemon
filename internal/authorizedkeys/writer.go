@@ -30,9 +30,10 @@ func validateAndNormalizePublicKey(raw string) (string, error) {
 }
 
 // Apply writes the desired state to the authorized_keys file using atomic write.
-// It preserves any keys outside the managed block.
-func Apply(path string, keys []state.AuthorizedKey) error {
-	// Parse existing file to preserve unmanaged keys
+// When exclusive is false, it preserves any keys outside the managed block.
+// When exclusive is true, only managed keys are written (unmanaged keys are removed).
+func Apply(path string, keys []state.AuthorizedKey, exclusive bool) error {
+	// Parse existing file to preserve unmanaged keys (when not exclusive)
 	parsed, err := Parse(path)
 	if err != nil {
 		return fmt.Errorf("authorizedkeys: parse existing: %w", err)
@@ -41,8 +42,10 @@ func Apply(path string, keys []state.AuthorizedKey) error {
 	// Build new file content
 	var lines []string
 
-	// Pre-block (unmanaged keys before the managed section)
-	lines = append(lines, parsed.PreBlock...)
+	// Pre-block (unmanaged keys before the managed section) — skip in exclusive mode
+	if !exclusive {
+		lines = append(lines, parsed.PreBlock...)
+	}
 
 	// Managed block
 	lines = append(lines, DefaultBeginMarker)
@@ -57,8 +60,10 @@ func Apply(path string, keys []state.AuthorizedKey) error {
 	}
 	lines = append(lines, DefaultEndMarker)
 
-	// Post-block (unmanaged keys after the managed section)
-	lines = append(lines, parsed.PostBlock...)
+	// Post-block (unmanaged keys after the managed section) — skip in exclusive mode
+	if !exclusive {
+		lines = append(lines, parsed.PostBlock...)
+	}
 
 	content := strings.Join(lines, "\n") + "\n"
 

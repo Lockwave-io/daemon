@@ -27,14 +27,28 @@ type Manager struct {
 	RunCommand func(name string, args ...string) ([]byte, error)
 }
 
+// defaultRunCommand executes system commands using hardcoded binary paths.
+func defaultRunCommand(name string, args ...string) ([]byte, error) {
+	switch name {
+	case "sshd":
+		return exec.Command("sshd", args...).CombinedOutput() // #nosec G204 -- args are hardcoded by callers
+	case "systemctl":
+		return exec.Command("systemctl", args...).CombinedOutput() // #nosec G204 -- args are hardcoded by callers
+	case "pidof":
+		return exec.Command("pidof", args...).CombinedOutput() // #nosec G204 -- args are hardcoded by callers
+	case "kill":
+		return exec.Command("kill", args...).CombinedOutput() // #nosec G204 -- args are hardcoded by callers
+	default:
+		return nil, fmt.Errorf("unsupported command: %s", name)
+	}
+}
+
 // DefaultManager returns a Manager with production paths and real command execution.
 func DefaultManager() *Manager {
 	return &Manager{
 		DropInDir:  DefaultDropInDir,
 		DropInFile: DefaultDropInFile,
-		RunCommand: func(name string, args ...string) ([]byte, error) {
-			return exec.Command(name, args...).CombinedOutput()
-		},
+		RunCommand: defaultRunCommand,
 	}
 }
 

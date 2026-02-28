@@ -100,8 +100,6 @@ func TestRegisterRequest_OmitsEmptyDiscoveredKeys(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	// The JSON should not contain "discovered_keys" when the slice is nil
-	if string(data) != string(data) { // placeholder to avoid import issues
-	}
 	var m map[string]interface{}
 	if err := json.Unmarshal(data, &m); err != nil {
 		t.Fatalf("unmarshal to map: %v", err)

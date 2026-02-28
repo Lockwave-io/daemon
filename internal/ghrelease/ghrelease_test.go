@@ -11,7 +11,7 @@ import (
 
 func TestFetchChecksum(t *testing.T) {
 	binaryName := fmt.Sprintf("lockwaved-%s-%s", runtime.GOOS, runtime.GOARCH)
-	checksumContent := fmt.Sprintf("abc123def456  lockwaved-linux-amd64\n789xyz000111  %s\n", binaryName)
+	checksumContent := fmt.Sprintf("abc123def456  lockwaved-other-platform\n789xyz000111  %s\n", binaryName)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, checksumContent)

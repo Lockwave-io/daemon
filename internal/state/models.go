@@ -44,6 +44,7 @@ type SyncConfig struct {
 type ConfigUser struct {
 	OSUser             string `json:"os_user"`
 	AuthorizedKeysPath string `json:"authorized_keys_path,omitempty"`
+	ExclusiveKeys      bool   `json:"exclusive_keys"`
 }
 
 // UpdateHint tells the daemon a newer version is available and where to download it.
@@ -55,8 +56,10 @@ type UpdateHint struct {
 
 // HostPolicy contains policy directives from the server.
 type HostPolicy struct {
-	PollSeconds int        `json:"poll_seconds"`
-	BreakGlass  BreakGlass `json:"break_glass"`
+	PollSeconds       int        `json:"poll_seconds"`
+	BlockPasswordAuth bool       `json:"block_password_auth"`
+	EnforceIPBinding  bool       `json:"enforce_ip_binding"`
+	BreakGlass        BreakGlass `json:"break_glass"`
 }
 
 // BreakGlass indicates whether emergency lockout is active.
@@ -69,6 +72,7 @@ type BreakGlass struct {
 type DesiredState struct {
 	OSUser         string          `json:"os_user"`
 	AuthorizedKeys []AuthorizedKey `json:"authorized_keys"`
+	ExclusiveKeys  bool            `json:"exclusive_keys"`
 }
 
 // AuthorizedKey is a single SSH public key to be placed in authorized_keys.

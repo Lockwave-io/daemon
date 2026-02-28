@@ -582,8 +582,10 @@ func doSync(ctx context.Context, client *api.Client, cfg *config.Config, configP
 	}
 
 	logger.WithFields(logrus.Fields{
-		"break_glass":   resp.HostPolicy.BreakGlass.Active,
-		"desired_users": len(resp.DesiredState),
+		"break_glass":          resp.HostPolicy.BreakGlass.Active,
+		"block_password_auth":  resp.HostPolicy.BlockPasswordAuth,
+		"enforce_ip_binding":   resp.HostPolicy.EnforceIPBinding,
+		"desired_users":        len(resp.DesiredState),
 	}).Info("sync response received")
 
 	// Apply desired state for each managed user
@@ -601,7 +603,7 @@ func doSync(ctx context.Context, client *api.Client, cfg *config.Config, configP
 		}
 
 		path := user.ResolveAuthorizedKeysPath()
-		if err := authorizedkeys.Apply(path, ds.AuthorizedKeys); err != nil {
+		if err := authorizedkeys.Apply(path, ds.AuthorizedKeys, ds.ExclusiveKeys); err != nil {
 			logger.WithFields(logrus.Fields{
 				"user":  ds.OSUser,
 				"path":  path,
@@ -690,6 +692,7 @@ func reconcileConfig(cfg *config.Config, sc *state.SyncConfig, configPath string
 			newUsers = append(newUsers, config.ManagedUser{
 				OSUser:             su.OSUser,
 				AuthorizedKeysPath: su.AuthorizedKeysPath,
+				ExclusiveKeys:      su.ExclusiveKeys,
 			})
 		}
 		// Check if users actually changed
@@ -725,7 +728,7 @@ func managedUsersEqual(a []config.ManagedUser, b []config.ManagedUser) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].OSUser != b[i].OSUser || a[i].AuthorizedKeysPath != b[i].AuthorizedKeysPath {
+		if a[i].OSUser != b[i].OSUser || a[i].AuthorizedKeysPath != b[i].AuthorizedKeysPath || a[i].ExclusiveKeys != b[i].ExclusiveKeys {
 			return false
 		}
 	}
@@ -885,10 +888,12 @@ func runCheck(configPath string) error {
 	}
 
 	fmt.Printf("Health check OK\n")
-	fmt.Printf("  Server time:   %s\n", resp.ServerTime)
-	fmt.Printf("  Poll seconds:  %d\n", resp.HostPolicy.PollSeconds)
-	fmt.Printf("  Break glass:   %v\n", resp.HostPolicy.BreakGlass.Active)
-	fmt.Printf("  Desired users: %d\n", len(resp.DesiredState))
+	fmt.Printf("  Server time:       %s\n", resp.ServerTime)
+	fmt.Printf("  Poll seconds:      %d\n", resp.HostPolicy.PollSeconds)
+	fmt.Printf("  Block pw auth:     %v\n", resp.HostPolicy.BlockPasswordAuth)
+	fmt.Printf("  Enforce IP bind:   %v\n", resp.HostPolicy.EnforceIPBinding)
+	fmt.Printf("  Break glass:       %v\n", resp.HostPolicy.BreakGlass.Active)
+	fmt.Printf("  Desired users:     %d\n", len(resp.DesiredState))
 	return nil
 }
 

@@ -31,7 +31,7 @@
 From the [Lockwave dashboard](https://lockwave.io), create a host and generate an **enrollment token**. Then on the server:
 
 ```bash
-curl -fsSL https://github.com/lockwave-io/lockwaved/releases/latest/download/install.sh | sudo bash -s -- \
+curl -fsSL https://get.lockwave.io/install.sh | sudo bash -s -- \
   --token YOUR_64_CHAR_ENROLLMENT_TOKEN \
   --os-user deploy
 ```
@@ -47,7 +47,7 @@ The API URL defaults to **https://lockwave.io**; omit `--api-url` unless you use
 The script downloads the binary from [GitHub Releases](https://github.com/lockwave-io/lockwaved/releases), installs it to `/usr/local/bin/lockwaved`, config to `/etc/lockwave/`, and (on systemd systems) the `lockwaved.service` unit.
 
 ```bash
-curl -fsSL https://github.com/lockwave-io/lockwaved/releases/latest/download/install.sh | sudo bash -s -- \
+curl -fsSL https://get.lockwave.io/install.sh | sudo bash -s -- \
   --token <enrollment_token> \
   --os-user deploy \
   [--api-url https://lockwave.io] \
@@ -82,7 +82,7 @@ curl -fsSL https://github.com/lockwave-io/lockwaved/releases/latest/download/ins
 #### Option A: Uninstall script (recommended)
 
 ```bash
-curl -fsSL https://github.com/lockwave-io/lockwaved/releases/latest/download/install.sh | sudo bash -s -- --uninstall
+curl -fsSL https://get.lockwave.io/install.sh | sudo bash -s -- --uninstall
 ```
 
 This automatically removes **everything**: the systemd service, binary, sshd drop-in config, and the config directory (`/etc/lockwave`).

@@ -2,10 +2,11 @@ package state
 
 // SyncRequest is the payload sent to POST /api/daemon/v1/sync.
 type SyncRequest struct {
-	HostID        string     `json:"host_id"`
-	DaemonVersion string     `json:"daemon_version,omitempty"`
-	Status        HostStatus `json:"status"`
-	Observed      []Observed `json:"observed"`
+	HostID         string          `json:"host_id"`
+	DaemonVersion  string          `json:"daemon_version,omitempty"`
+	Status         HostStatus      `json:"status"`
+	Observed       []Observed      `json:"observed"`
+	DiscoveredKeys []DiscoveredKey `json:"discovered_keys,omitempty"`
 }
 
 // HostStatus reports the daemon's current state.

@@ -509,8 +509,12 @@ func doSync(ctx context.Context, client *api.Client, cfg *config.Config, configP
 		}
 	}
 
-	// Build observed state from current authorized_keys files
+	// Build observed state from current authorized_keys files.
+	// When a user's managed block is absent this is treated as the first sync for
+	// that user, so we also collect any pre-existing public keys to send as
+	// DiscoveredKeys so the control plane can import and auto-assign them.
 	observed := make([]state.Observed, 0, len(cfg.Users))
+	var discoveredKeys []state.DiscoveredKey
 	for _, u := range cfg.Users {
 		path := u.ResolveAuthorizedKeysPath()
 		parsed, err := authorizedkeys.Parse(path)
@@ -536,18 +540,40 @@ func doSync(ctx context.Context, client *api.Client, cfg *config.Config, configP
 			ManagedBlockPresent:     parsed.HasManagedBlock,
 			ManagedKeysFingerprints: fingerprints,
 		})
+
+		// First sync for this user: collect existing public keys from outside the
+		// managed block so the control plane can import them. This mirrors the
+		// key discovery done during registration in runRegister().
+		if !parsed.HasManagedBlock {
+			for _, line := range append(parsed.PreBlock, parsed.PostBlock...) {
+				trimmed := strings.TrimSpace(line)
+				if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+					continue
+				}
+				if strings.HasPrefix(trimmed, "ssh-") || strings.HasPrefix(trimmed, "ecdsa-") {
+					discoveredKeys = append(discoveredKeys, state.DiscoveredKey{
+						OSUser:    u.OSUser,
+						PublicKey: trimmed,
+					})
+				}
+			}
+		}
+	}
+	if len(discoveredKeys) > 0 {
+		logger.WithField("count", len(discoveredKeys)).Info("first sync: discovered existing SSH keys to report")
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	syncReq := &state.SyncRequest{
-		HostID:        cfg.HostID,
-		DaemonVersion: version,
+		HostID:         cfg.HostID,
+		DaemonVersion:  version,
 		Status: state.HostStatus{
 			LastApplyResult: lastResult,
 			DriftDetected:   driftDetected,
 			AppliedAt:       &now,
 		},
-		Observed: observed,
+		Observed:       observed,
+		DiscoveredKeys: discoveredKeys,
 	}
 
 	resp, err := client.Sync(ctx, syncReq)

@@ -82,6 +82,22 @@ LOCKWAVE_BINARY_URL=https://releases.lockwave.io/lockwaved/latest
    Add `--api-url <url>` only if you use a different API endpoint; the default is **https://lockwave.io**. This writes `/etc/lockwave/config.yaml` (mode 0600).
 4. **Run** as a service: use the provided [systemd unit](packaging/lockwaved.service) or your process manager.
 
+### Uninstall
+
+To remove the daemon, binary, and (optionally) config:
+
+```bash
+curl -fsSL https://lockwave.io/uninstall.sh | sudo bash
+```
+
+To remove the config directory `/etc/lockwave` without prompting (e.g. for automation), pass `--yes`:
+
+```bash
+curl -fsSL https://lockwave.io/uninstall.sh | sudo bash -s -- --yes
+```
+
+You can also uninstall using the install script: `curl -fsSL https://lockwave.io/install.sh | sudo bash -s -- --uninstall`.
+
 ---
 
 ## Configuration

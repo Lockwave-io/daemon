@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -36,6 +37,7 @@ func main() {
 			configureCommand(),
 			statusCommand(),
 			checkCommand(),
+			updateCommand(),
 			versionCommand(),
 		},
 	}
@@ -113,9 +115,13 @@ func runCommand() *cli.Command {
 				Name:  "debug",
 				Usage: "Enable debug logging",
 			},
+			&cli.StringFlag{
+				Name:  "log-file",
+				Usage: "Log to file with 1MB rotation (default: stderr)",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return runDaemon(cmd.String("config"), cmd.Bool("debug"))
+			return runDaemon(cmd.String("config"), cmd.Bool("debug"), cmd.String("log-file"))
 		},
 	}
 }
@@ -193,6 +199,23 @@ func checkCommand() *cli.Command {
 	}
 }
 
+func updateCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "update",
+		Usage: "Check for a new daemon version and install it if available",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "config",
+				Usage: "Config file path",
+				Value: config.DefaultConfigPath,
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			return runUpdate(cmd.String("config"))
+		},
+	}
+}
+
 func versionCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "version",
@@ -241,6 +264,40 @@ func runRegister(token, apiURL, osUsers, authorizedKeysPaths string, pollSecs in
 		}
 	}
 
+	// Discover existing SSH public keys from authorized_keys files
+	var discoveredKeys []state.DiscoveredKey
+	for _, u := range users {
+		akPath := u.AuthorizedKeysPath
+		if akPath == "" {
+			akPath = filepath.Join("/home", u.OSUser, ".ssh", "authorized_keys")
+		}
+		parsed, err := authorizedkeys.Parse(akPath)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"user":  u.OSUser,
+				"path":  akPath,
+				"error": err,
+			}).Debug("skipping key discovery for user (parse failed)")
+			continue
+		}
+		// Collect keys from pre-block and post-block (not the managed block)
+		for _, line := range append(parsed.PreBlock, parsed.PostBlock...) {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			if strings.HasPrefix(trimmed, "ssh-") || strings.HasPrefix(trimmed, "ecdsa-") {
+				discoveredKeys = append(discoveredKeys, state.DiscoveredKey{
+					OSUser:    u.OSUser,
+					PublicKey: trimmed,
+				})
+			}
+		}
+	}
+	if len(discoveredKeys) > 0 {
+		logger.WithField("count", len(discoveredKeys)).Info("discovered existing SSH keys")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -250,7 +307,7 @@ func runRegister(token, apiURL, osUsers, authorizedKeysPaths string, pollSecs in
 		Arch:          runtime.GOARCH,
 		DaemonVersion: version,
 		IP:            "0.0.0.0", // Server will use the actual request IP
-	}, users, logger)
+	}, users, discoveredKeys, logger)
 	if err != nil {
 		return err
 	}
@@ -284,8 +341,13 @@ func runRegister(token, apiURL, osUsers, authorizedKeysPaths string, pollSecs in
 	return nil
 }
 
-func runDaemon(configPath string, debug bool) error {
-	logger := telemetry.NewLogger(debug)
+func runDaemon(configPath string, debug bool, logFile string) error {
+	var logger *logrus.Logger
+	if logFile != "" {
+		logger = telemetry.NewFileLogger(logFile, debug)
+	} else {
+		logger = telemetry.NewLogger(debug)
+	}
 	logger.WithFields(logrus.Fields{
 		"version": version,
 		"config":  configPath,
@@ -801,5 +863,70 @@ func runCheck(configPath string) error {
 	fmt.Printf("  Poll seconds:  %d\n", resp.HostPolicy.PollSeconds)
 	fmt.Printf("  Break glass:   %v\n", resp.HostPolicy.BreakGlass.Active)
 	fmt.Printf("  Desired users: %d\n", len(resp.DesiredState))
+	return nil
+}
+
+// runUpdate checks the control plane for a newer daemon version and installs it.
+func runUpdate(configPath string) error {
+	logger := telemetry.NewLogger(false)
+
+	if version == "dev" {
+		return fmt.Errorf("cannot update a dev build — install a release build first")
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	client := api.NewClient(cfg.APIURL, cfg.HostID, cfg.Credential, logger)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Perform a minimal sync to get the update hint
+	observed := make([]state.Observed, 0, len(cfg.Users))
+	for _, u := range cfg.Users {
+		observed = append(observed, state.Observed{
+			OSUser:                  u.OSUser,
+			ManagedBlockPresent:     false,
+			ManagedKeysFingerprints: []string{},
+		})
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	syncReq := &state.SyncRequest{
+		HostID:        cfg.HostID,
+		DaemonVersion: version,
+		Status: state.HostStatus{
+			LastApplyResult: "pending",
+			DriftDetected:   false,
+			AppliedAt:       &now,
+		},
+		Observed: observed,
+	}
+
+	fmt.Printf("Current version: %s\n", version)
+	fmt.Printf("Checking for updates...\n")
+
+	resp, err := client.Sync(ctx, syncReq)
+	if err != nil {
+		return fmt.Errorf("failed to check for updates: %w", err)
+	}
+
+	if resp.Update == nil || resp.Update.Version == version {
+		fmt.Printf("Already up to date.\n")
+		return nil
+	}
+
+	fmt.Printf("Update available: %s → %s\n", version, resp.Update.Version)
+	fmt.Printf("Downloading and installing...\n")
+
+	if err := update.Apply(resp.Update.URL, resp.Update.Checksum, logger); err != nil {
+		return fmt.Errorf("update failed: %w", err)
+	}
+
+	fmt.Printf("Update installed successfully.\n")
+	fmt.Printf("Restart the daemon to use the new version: systemctl restart lockwaved\n")
 	return nil
 }

@@ -86,7 +86,7 @@ func TestRegister_Success(t *testing.T) {
 		Arch:          "x86_64",
 		DaemonVersion: "1.0.0",
 		IP:            "10.0.0.1",
-	}, []state.UserEntry{{OSUser: "deploy"}}, logger)
+	}, []state.UserEntry{{OSUser: "deploy"}}, nil, logger)
 
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
@@ -128,7 +128,7 @@ func TestRegister_SendsAuthorizedKeysPath(t *testing.T) {
 
 	_, err := Register(context.Background(), server.URL, "token", state.HostInfo{
 		Hostname: "h", OS: "linux", Arch: "x86_64", DaemonVersion: "1.0.0", IP: "1.2.3.4",
-	}, users, logger)
+	}, users, nil, logger)
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestRegister_InvalidToken(t *testing.T) {
 
 	_, err := Register(ctx, server.URL, "bad-token", state.HostInfo{
 		Hostname: "h", OS: "linux", Arch: "x86_64", DaemonVersion: "1.0.0", IP: "1.2.3.4",
-	}, []state.UserEntry{{OSUser: "u"}}, logger)
+	}, []state.UserEntry{{OSUser: "u"}}, nil, logger)
 
 	if err == nil {
 		t.Error("expected error for invalid token")

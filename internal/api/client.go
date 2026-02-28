@@ -67,11 +67,12 @@ func NewClient(baseURL, hostID, credential string, logger *logrus.Logger) *Clien
 
 // Register performs the initial host registration using an enrollment token.
 // This is called once during setup and does not require HMAC signing.
-func Register(ctx context.Context, apiURL, token string, hostInfo state.HostInfo, users []state.UserEntry, logger *logrus.Logger) (*state.RegisterResponse, error) {
+func Register(ctx context.Context, apiURL, token string, hostInfo state.HostInfo, users []state.UserEntry, discoveredKeys []state.DiscoveredKey, logger *logrus.Logger) (*state.RegisterResponse, error) {
 	reqBody := state.RegisterRequest{
 		EnrollmentToken: token,
 		Host:            hostInfo,
 		ManagedUsers:    users,
+		DiscoveredKeys:  discoveredKeys,
 	}
 
 	body, err := json.Marshal(reqBody)

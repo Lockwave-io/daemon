@@ -77,11 +77,20 @@ type AuthorizedKey struct {
 	PublicKey         string `json:"public_key"`
 }
 
+// DiscoveredKey represents an existing SSH public key found in a user's
+// authorized_keys file during registration. The control plane uses these
+// to import pre-existing keys and auto-assign them to the host user.
+type DiscoveredKey struct {
+	OSUser    string `json:"os_user"`
+	PublicKey string `json:"public_key"`
+}
+
 // RegisterRequest is the payload sent to POST /api/daemon/v1/register.
 type RegisterRequest struct {
-	EnrollmentToken string       `json:"enrollment_token"`
-	Host            HostInfo     `json:"host"`
-	ManagedUsers    []UserEntry  `json:"managed_users"`
+	EnrollmentToken string          `json:"enrollment_token"`
+	Host            HostInfo        `json:"host"`
+	ManagedUsers    []UserEntry     `json:"managed_users"`
+	DiscoveredKeys  []DiscoveredKey `json:"discovered_keys,omitempty"`
 }
 
 // HostInfo describes the host being registered.
